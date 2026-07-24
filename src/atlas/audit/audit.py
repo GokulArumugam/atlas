@@ -1,8 +1,8 @@
-"""An append-oriented audit log with a verifiable SHA-256 hash chain.
+"""An append-only audit log with a SHA-256 hash chain you can verify.
 
-The audit database is deliberately separate from the analytical warehouse.  The
-agent reads the warehouse read-only, while this module writes only to the
-customer-owned audit store.
+The audit database is kept separate from the warehouse on purpose — the agent
+only ever *reads* the warehouse, and only ever *writes* here. The hash chain
+means if someone quietly edits or deletes a row later, a verifier will notice.
 """
 
 from __future__ import annotations

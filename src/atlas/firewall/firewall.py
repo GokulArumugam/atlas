@@ -1,9 +1,11 @@
-"""A deliberately small, fail-closed SQL firewall.
+"""The SQL firewall — small on purpose, and it fails closed.
 
-This module is the enforcement boundary for warehouses that do not provide
-their own row/column security.  It accepts only completely resolvable read
-queries, checks every concrete source against the policy engine, and rewrites
-only final output projections that policy says must be masked.
+This is the thing standing between a user and data they shouldn't see, for any
+warehouse that doesn't enforce that itself. The rule it lives by: if it can't
+*prove* a query is safe, it doesn't run it. So it only accepts read queries it
+can fully resolve, checks every real table/column against the policy, and masks
+the output columns policy says to mask. Anything it can't pin down gets rejected,
+never guessed.
 """
 
 from __future__ import annotations
@@ -19,8 +21,7 @@ from sqlglot.optimizer.scope import Scope, traverse_scope
 from sqlglot.schema import MappingSchema
 
 from atlas.policy.engine import PolicyEngine
-from atlas.policy.model import ColumnRef, Decision, TableRef
-from atlas.policy.policies import POLICY_CONFIG
+from atlas.policy.model import ColumnRef, Decision, TableRef, display_name
 
 
 @dataclass
@@ -34,7 +35,7 @@ class FirewallResult:
 
 
 class _Unresolvable(Exception):
-    """Internal signal: input cannot be proven safe enough to execute."""
+    """Our internal way of saying: can't prove this is safe, so bail out."""
 
 
 class SqlFirewall:
@@ -62,12 +63,14 @@ class SqlFirewall:
     def __init__(self, policy: PolicyEngine, dialect: str = "duckdb") -> None:
         self.policy = policy
         self.dialect = dialect
+        # Read the catalog straight from the injected policy so the firewall's view
+        # of the schema is always exactly what the policy is enforcing against.
         self._catalog = {
             schema.lower(): {
                 table.lower(): {column.lower() for column in columns}
                 for table, columns in tables.items()
             }
-            for schema, tables in POLICY_CONFIG["tables"].items()
+            for schema, tables in policy.catalog_tables().items()
         }
         # MappingSchema expects column -> type mappings, not the sets kept by the
         # policy catalog. UNKNOWN is sufficient for qualification and star expansion.
@@ -81,7 +84,7 @@ class SqlFirewall:
         self._schema = MappingSchema(mapping, dialect=dialect, normalize=True)
 
     def check(self, user: str, sql: str) -> FirewallResult:
-        """Return executable, normalized SQL only after every safety check passes."""
+        """Hand back executable, normalized SQL only once every check has passed."""
         try:
             if not isinstance(sql, str) or not sql.strip():
                 return self._deny("I can't run an empty or invalid SQL query.")
@@ -191,7 +194,8 @@ class SqlFirewall:
         except (SqlglotError, _Unresolvable, KeyError, TypeError, ValueError):
             return self._deny("I can't safely verify that SQL query, so I won't run it.")
         except Exception:
-            # Security boundary: never allow or propagate an unexpected failure.
+            # This is a security boundary, so an unexpected crash must never turn
+            # into an "allow" — swallow it and deny.
             return self._deny("I can't safely verify that SQL query, so I won't run it.")
 
     def _explicit_base_tables(self, expression: exp.Expression) -> list[TableRef]:
@@ -381,23 +385,15 @@ class SqlFirewall:
         else:
             projection.replace(masking_expression)
 
-    _DISPLAY_NAMES = {
-        "phone": "Phone numbers",
-        "email": "Email addresses",
-        "pan": "PAN numbers",
-        "full_name": "Full names",
-        "salary": "Salaries",
-    }
-
     @classmethod
     def _masked_reason(cls, columns: Iterable[ColumnRef]) -> str:
         """Name the columns that actually triggered the refusal.
 
-        The wording must follow the offending column, not a hard-coded example —
-        telling someone who filtered on PAN that "phone numbers are masked" is both
-        wrong and makes the refusal look canned.
+        The wording has to follow the column the user actually touched — telling
+        someone who filtered on PAN that "phone numbers are masked" is both wrong
+        and makes the refusal look canned.
         """
-        names = sorted({cls._DISPLAY_NAMES.get(c.column, c.column.replace("_", " ").capitalize()) for c in columns})
+        names = sorted({display_name(c.column) for c in columns})
         subject = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
         return (
             f"{subject} are masked for your role — I can count or average them, "

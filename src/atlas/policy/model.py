@@ -4,6 +4,22 @@ from dataclasses import dataclass
 from enum import Enum
 
 
+# Friendly plural names for PII columns, shared by the policy engine and the
+# firewall so their user-facing messages stay consistent (one source of truth).
+_PII_DISPLAY_NAMES = {
+    "phone": "Phone numbers",
+    "email": "Email addresses",
+    "pan": "PAN numbers",
+    "full_name": "Full names",
+    "salary": "Salaries",
+}
+
+
+def display_name(column: str) -> str:
+    """Turn a column name like 'full_name' into 'Full names' for messages."""
+    return _PII_DISPLAY_NAMES.get(column, column.replace("_", " ").capitalize())
+
+
 @dataclass(frozen=True)
 class TableRef:
     schema: str

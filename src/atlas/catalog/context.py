@@ -1,4 +1,4 @@
-"""Deterministic, policy-scoped retrieval context for a later text-to-SQL agent."""
+"""Builds the little context blob we hand the text-to-SQL step — scoped per user."""
 
 from __future__ import annotations
 

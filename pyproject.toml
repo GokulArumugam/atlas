@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "atlas-analyst"
+version = "0.1.0"
+description = "An AI data analyst that enforces who's allowed to see what — with a fail-closed SQL firewall and a tamper-evident audit trail."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Gokul Arumugam" }]
+keywords = ["text-to-sql", "data-governance", "sql-firewall", "duckdb", "llm"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "duckdb>=0.10",
+    "sqlglot>=23",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[project.urls]
+Homepage = "https://github.com/GokulArumugam/atlas"
+Repository = "https://github.com/GokulArumugam/atlas"
+
+[project.scripts]
+atlas-serve = "atlas.api.app:serve"
+atlas-demo = "atlas.demo:main"
+atlas-generate = "atlas.data.generate:generate"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/atlas"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

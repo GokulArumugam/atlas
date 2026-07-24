@@ -1,4 +1,4 @@
-"""The runtime data-plane analyst: scope, generate, enforce, execute, and audit."""
+"""The runtime analyst: scope it, generate SQL, enforce, run, and log."""
 
 from __future__ import annotations
 
@@ -36,12 +36,13 @@ class AnalystAnswer:
 
 
 class Analyst:
-    """Orchestrate the governed analytical path inside the customer data plane.
+    """Runs the whole governed path for one question.
 
-    The critical boundary is intentionally narrow: `_execute_safe_sql` receives
-    only `FirewallResult.safe_sql`, never a generator result.  Keeping that call
-    separate makes it straightforward to test that a denial cannot query the
-    warehouse and that an allow/mask executes byte-for-byte approved SQL.
+    There's one boundary I care about a lot: `_execute_safe_sql` only ever gets
+    `FirewallResult.safe_sql` — never the raw SQL the generator produced. Keeping
+    that call separate makes it easy to prove two things in tests: a denial never
+    touches the warehouse, and an allow/mask runs exactly the SQL the firewall
+    approved, byte for byte.
     """
 
     def __init__(
@@ -73,23 +74,14 @@ class Analyst:
         generation_started = perf_counter()
         try:
             generated_sql = self.generator.generate(user, question, context)
-        except UnsupportedQuestion as error:
-            latency_ms["generate"] = _elapsed_ms(generation_started)
-            latency_ms["total"] = _elapsed_ms(started)
-            return self._audited_answer(
-                user=user,
-                question=question,
-                mermaid=mermaid,
-                generated_sql=None,
-                result=None,
-                decision=Decision.DENY,
-                reason=str(error),
-                columns=[],
-                rows=[],
-                chart=None,
-                latency_ms=latency_ms,
+        except Exception as error:
+            # A known "I don't understand that question" and an unexpected generator
+            # failure both end the same way: a clean denial, nothing executed.
+            reason = (
+                str(error)
+                if isinstance(error, UnsupportedQuestion)
+                else "I couldn't generate a safe query for that question."
             )
-        except Exception:
             latency_ms["generate"] = _elapsed_ms(generation_started)
             latency_ms["total"] = _elapsed_ms(started)
             return self._audited_answer(
@@ -99,7 +91,7 @@ class Analyst:
                 generated_sql=None,
                 result=None,
                 decision=Decision.DENY,
-                reason="I couldn't generate a safe query for that question.",
+                reason=reason,
                 columns=[],
                 rows=[],
                 chart=None,
@@ -126,8 +118,8 @@ class Analyst:
                 latency_ms=latency_ms,
             )
 
-        # SECURITY INVARIANT: safe_sql is the only SQL passed to DuckDB.  The raw
-        # generator output above is retained only for the customer audit record.
+        # The one rule that matters: safe_sql is the ONLY SQL that ever reaches
+        # DuckDB. The raw generator output above is kept purely for the audit record.
         safe_sql = result.safe_sql
         if safe_sql is None:  # Defensive fail-closed guard for any future firewall change.
             latency_ms["total"] = _elapsed_ms(started)

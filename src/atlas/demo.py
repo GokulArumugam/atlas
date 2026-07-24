@@ -1,11 +1,8 @@
-"""Run the five-question governed analyst demonstration offline by default."""
+"""The five-question walkthrough — runs fully offline by default."""
 
-import sys
-from pathlib import Path
+from __future__ import annotations
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from atlas.agent.analyst import Analyst  # noqa: E402
+from atlas.agent.analyst import Analyst
 
 
 def main() -> None:

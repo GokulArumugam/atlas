@@ -1,4 +1,4 @@
-"""Small, defensive FastAPI facade for the governed analyst data plane."""
+"""A small, defensive FastAPI wrapper around the analyst."""
 
 from __future__ import annotations
 
@@ -27,7 +27,16 @@ AUDIT_PATH = ROOT / "data" / "audit.duckdb"
 # re-parse of the historical query corpus for every browser interaction.
 analyst = Analyst(db_path=str(DB_PATH), audit_path=str(AUDIT_PATH))
 
-app = FastAPI(title="Governed AI Data Analyst", version="1.0")
+app = FastAPI(
+    title="Atlas — Governed AI Data Analyst",
+    version="1.0",
+    description=(
+        "⚠️ DEMO ONLY — there is no authentication here. The API trusts whatever "
+        "`user` you send it, so don't point this at a real warehouse. The firewall, "
+        "per-user scoping, and audit trail are real; the auth layer is intentionally "
+        "left as 'later.'"
+    ),
+)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -133,3 +142,10 @@ def index():
         return FileResponse(STATIC_DIR / "index.html")
     except Exception:
         return _error("Unable to load the application interface.")
+
+
+def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
+    """Entry point for `atlas-serve` — spin up the local web UI."""
+    import uvicorn
+
+    uvicorn.run("atlas.api.app:app", host=host, port=port)

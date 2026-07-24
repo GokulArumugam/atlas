@@ -38,8 +38,8 @@
 ## Run commands
 
 ```bash
-cd atlas
-./.venv/bin/python -m src.atlas.data.generate
+cd /path/to/atlas
+PYTHONPATH=src ./.venv/bin/python -m atlas.data.generate
 ./.venv/bin/pytest tests/ -q
 ./.venv/bin/python -c "import duckdb; c=duckdb.connect('data/warehouse.duckdb', read_only=True); print(c.execute('SELECT COUNT(DISTINCT sql_text) FROM meta.query_history').fetchone()[0])"
 ./.venv/bin/python -c "import duckdb; c=duckdb.connect('data/warehouse.duckdb'); print(c.execute(\"SELECT AVG(t.rider_count), COUNT(*) FROM rides.trips t JOIN rides.locations s ON t.start_location_id=s.id JOIN rides.locations d ON t.end_location_id=d.id WHERE s.name='Airport' AND d.name='Downtown'\").fetchone())"
@@ -50,7 +50,7 @@ The sanity query must return a non-null average and a positive trip count.
 ### Runtime demo
 
 ```bash
-cd atlas
+cd /path/to/atlas
 PYTHONPATH=src ./.venv/bin/python scripts/demo.py
 ```
 
@@ -64,7 +64,7 @@ The raw generated SQL is retained solely in the customer audit record.
 Construct the metadata map and a user-specific Mermaid view with:
 
 ```bash
-cd atlas
+cd /path/to/atlas
 PYTHONPATH=src ./.venv/bin/python -c "from atlas.catalog.catalog import Catalog; from atlas.catalog.mindmap import MindMap; from atlas.policy.engine import PolicyEngine; c=Catalog('data/warehouse.duckdb', PolicyEngine()); m=MindMap(c); m.build('data/warehouse.duckdb'); print(m.to_mermaid('gokul'))"
 ```
 
@@ -118,7 +118,7 @@ still be counted or averaged.
 Run the complete verification suite with:
 
 ```bash
-cd atlas
+cd /path/to/atlas
 ./.venv/bin/pytest tests/ -q
 ```
 
@@ -135,7 +135,7 @@ The project is now feature-complete for the 90-second demo. Run the local
 server from the workspace root:
 
 ```bash
-cd atlas
+cd /path/to/atlas
 ./.venv/bin/python scripts/serve.py
 ```
 

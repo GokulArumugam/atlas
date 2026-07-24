@@ -1,4 +1,4 @@
-"""Read-only DuckDB schema catalog, deliberately scoped through policy."""
+"""The schema catalog — read-only, and always scoped through policy."""
 
 from __future__ import annotations
 

@@ -1,8 +1,13 @@
-"""Fail-closed policy verdicts; SQL parsing and enforcement belong to a later firewall."""
+"""The policy engine: says yes/no/mask, and nothing more.
+
+It only decides *whether* someone can see something — it never parses or rewrites
+SQL (that's the firewall's job). Everything here fails closed: unknown user,
+unknown table, unknown column all get a "no."
+"""
 
 from __future__ import annotations
 
-from .model import ColumnRef, Decision, TableRef, Verdict
+from .model import ColumnRef, Decision, TableRef, Verdict, display_name
 from .policies import POLICY_CONFIG
 
 
@@ -27,11 +32,11 @@ class PolicyEngine:
         user_config = self._user_config(user)
         if not user_config:
             return self._deny_table(table, "I can't access data for an unrecognized user.")
-        # NOTE (security, README 5B): the denial reason must NOT depend on whether the
-        # table actually exists. Branching on catalog existence here would turn every
-        # refusal into an enumeration oracle — probe a name, and the wording tells you
-        # whether it is real. Anything outside the user's visible set gets one identical
-        # answer, so "exists but forbidden" and "does not exist" are indistinguishable.
+        # Careful here: the refusal message must NOT depend on whether the table
+        # actually exists. If we said "that table doesn't exist" vs "you can't see
+        # that table," an attacker could probe names and learn what's real just from
+        # the wording. So anything outside the user's visible set gets the exact same
+        # answer — "exists but forbidden" and "doesn't exist" look identical.
         if table not in self.visible_tables(user):
             return self._deny_table(table, self._table_denial_reason(user, table))
         return Verdict(Decision.ALLOW, "Access to this table is permitted for your role.", [], [], [])
@@ -59,6 +64,15 @@ class PolicyEngine:
         # The caller may only substitute this after receiving a MASK verdict.
         return self.config.get("masking_expression", "'***MASKED***'")
 
+    def catalog_tables(self) -> dict:
+        """The schema -> table -> columns map the firewall builds its view from.
+
+        Exposing this (instead of the firewall importing the global config) means
+        the firewall and this engine can never quietly disagree about what the
+        catalog is — they read from the exact same injected config.
+        """
+        return self.config.get("tables", {})
+
     def is_pii(self, column: ColumnRef) -> bool:
         return self._column_key(column) in self.config.get("pii_columns", set())
 
@@ -74,15 +88,7 @@ class PolicyEngine:
 
     @staticmethod
     def _display_name(name: str) -> str:
-        if name == "phone":
-            return "Phone numbers"
-        if name == "email":
-            return "Email addresses"
-        if name == "pan":
-            return "PAN values"
-        if name == "full_name":
-            return "Full names"
-        return name.replace("_", " ").capitalize()
+        return display_name(name)
 
     def _table_denial_reason(self, user: str, table: TableRef) -> str:
         team = self.team_of(user)

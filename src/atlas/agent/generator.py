@@ -1,4 +1,4 @@
-"""Pluggable SQL generators, with a fully offline demo implementation."""
+"""SQL generators you can swap out — including one that works fully offline."""
 
 from __future__ import annotations
 
