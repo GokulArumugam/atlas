@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Atlas — Governed AI Data Analyst</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <div class="brand"><span class="brand-mark">A</span><span>Atlas</span></div>
+      <p class="eyebrow">GOVERNED ANALYST</p>
+      <section class="user-panel" aria-labelledby="user-heading">
+        <div class="panel-heading"><span id="user-heading">Active identity</span><span class="status-dot"></span></div>
+        <button id="active-user" class="active-user" aria-haspopup="listbox" aria-expanded="false">
+          <span class="avatar" id="active-avatar">G</span>
+          <span><strong id="active-name">gokul</strong><small id="active-team">engineering</small></span>
+          <span class="chevron">⌄</span>
+        </button>
+        <div id="user-list" class="user-list" role="listbox" aria-label="Switch active user"></div>
+      </section>
+      <section class="map-panel" aria-labelledby="map-heading">
+        <div class="panel-heading"><span id="map-heading">Your data map</span><span class="map-scope">SCOPED</span></div>
+        <div id="graph" class="graph" aria-live="polite"></div>
+        <p id="graph-caption" class="map-caption">Loading permitted tables…</p>
+      </section>
+      <div class="sidebar-footer"><span class="lock-icon">⌁</span> Customer data plane</div>
+    </aside>
+
+    <main class="main-pane">
+      <header class="topbar">
+        <div><p class="eyebrow">SECURE WORKSPACE</p><h1 id="workspace-title">Ask your governed data</h1></div>
+        <div class="privacy-pill"><span class="status-dot"></span> No vendor data egress</div>
+      </header>
+      <section id="chat-view" class="chat-view">
+        <div id="welcome" class="welcome">
+          <div class="welcome-icon">✦</div>
+          <h2>What would you like to know?</h2>
+          <p>Every question is checked against your role before SQL runs.</p>
+          <div id="example-chips" class="chips" aria-label="Example questions"></div>
+        </div>
+        <div id="answers" class="answers" aria-live="polite"></div>
+        <form id="ask-form" class="composer">
+          <label class="sr-only" for="question">Ask a question about your data</label>
+          <input id="question" autocomplete="off" placeholder="Ask a question about your data…">
+          <button id="send-button" type="submit"><span>Send</span><span aria-hidden="true">↗</span></button>
+        </form>
+      </section>
+      <section id="audit-view" class="audit-view hidden" aria-live="polite"></section>
+    </main>
+  </div>
+  <template id="answer-template"></template>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
