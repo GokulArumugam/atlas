@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from atlas.firewall.firewall import SqlFirewall
 from atlas.policy.engine import PolicyEngine
 from atlas.policy.model import Decision
-from test_firewall import ALLOW_CASES, MASK_CASES
+from tests.test_firewall import ALLOW_CASES, MASK_CASES
 
 
 @pytest.mark.parametrize(("user", "sql"), ALLOW_CASES + MASK_CASES)
