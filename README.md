@@ -66,7 +66,7 @@ flowchart LR
     end
 
     subgraph DB["🗄️ Your database"]
-        SNOW["Snowflake / Databricks / MySQL / ..."]
+        SNOW["Snowflake / Databricks / Postgres / MySQL / ..."]
     end
 
     SHELL --> ORCH
@@ -169,7 +169,7 @@ The picks that make this a *governance* product rather than just a chatbot:
 - **A policy layer** (here: a small dependency-free engine; Cerbos/OpenFGA in a real build) — the "Engineering can't see HR" verdict.
 - **A hash-chained audit log** — the tamper-evident logbook, kept in your own database.
 
-Around those: **FastAPI** for the API, **DuckDB** as the local warehouse for the demo, and a plain vanilla-JS frontend so there's no build step to fight with.
+Around those: **FastAPI** for the API, a **`WarehouseConnector` adapter layer** so any backend (DuckDB locally, Postgres in production) plugs in without touching the firewall or policy code, and a plain vanilla-JS frontend so there's no build step to fight with.
 
 ---
 
@@ -181,16 +181,34 @@ Around those: **FastAPI** for the API, **DuckDB** as the local warehouse for the
 - A read-only **catalog** and a query-history-backed **mind map** (`src/atlas/catalog/`), both scoped per user.
 - The runtime **analyst** (`src/atlas/agent/`) that ties it together — and only ever runs firewall-approved SQL.
 - A hash-chained **audit log** (`src/atlas/audit/`), kept in a separate database from the warehouse.
-- A thin **FastAPI** app + a self-contained web UI (`src/atlas/api/`, `static/`).
+- A pluggable **`WarehouseConnector` layer** (`src/atlas/connector/`) — `DuckDBConnector` for the local demo, `PostgresConnector` for any Postgres-compatible warehouse. Swapping backends is a one-liner; the firewall, catalog, and audit trail stay identical either way.
+- A thin **FastAPI** app + a self-contained web UI (`src/atlas/api/`, `static/`). FastAPI auto-generates an OpenAPI spec at `/openapi.json` that Postman can import directly.
+- A **Dockerfile + docker-compose** so you can spin up the whole thing without touching Python.
 
 ---
 
 ## Running it
 
+### Option A — Docker (no Python setup needed)
+
+```bash
+docker compose up --build
+```
+
+First run generates the demo warehouse automatically inside the container. Open `http://localhost:8000`. The data volume (`atlas-data`) sticks around between restarts so it doesn't regenerate every time.
+
+To use the real Claude LLM instead of the offline generator, drop your key in before starting:
+
+```bash
+ANTHROPIC_API_KEY=sk-... docker compose up --build
+```
+
+### Option B — Local virtualenv
+
 ```bash
 # set up a virtualenv and install deps
 python3 -m venv .venv
-./.venv/bin/pip install duckdb sqlglot fastapi "uvicorn[standard]" pydantic pytest
+./.venv/bin/pip install -e .
 
 # build the demo warehouse
 PYTHONPATH=src ./.venv/bin/python -m atlas.data.generate
@@ -205,13 +223,47 @@ PYTHONPATH=src ./.venv/bin/python scripts/demo.py
 ./.venv/bin/python scripts/serve.py   # then open http://127.0.0.1:8000
 ```
 
+### Using it with Postman
+
+Once the server is running (either way), Postman can import the full API collection automatically:
+
+1. In Postman: **Import → Link**
+2. Paste `http://localhost:8000/openapi.json`
+3. That's it — all four endpoints show up with their request schemas ready to fill in.
+
+Or browse the interactive Swagger UI at `http://localhost:8000/docs` if you just want to poke at it in the browser.
+
+---
+
+## Connecting a different database
+
+The default demo runs on DuckDB — embedded, no server, no setup. To point Atlas at a real Postgres warehouse, install the extra dep and swap the connector in `src/atlas/api/app.py`:
+
+```bash
+pip install "atlas-analyst[postgres]"
+```
+
+```python
+# in src/atlas/api/app.py — replace the DuckDBConnector line with:
+from atlas.connector import PostgresConnector
+
+analyst = Analyst(
+    connector=PostgresConnector("postgresql://user:pass@host:5432/mydb"),
+    audit_path=str(AUDIT_PATH),
+)
+```
+
+That's the whole change. The firewall picks up the Postgres SQL dialect from the connector automatically, and catalog introspection and join-graph mining work the same way. The `meta.query_history` table needs to exist in your warehouse for the map to learn from real queries — or you can skip it and Atlas falls back to declared foreign keys and column-name heuristics.
+
+To add a different backend (MySQL, Snowflake, Databricks, etc.), implement the `WarehouseConnector` protocol in `src/atlas/connector/` — you need `dialect`, `execute()`, and optionally `foreign_keys()`. The base class provides a default `query_history()` that runs `SELECT sql_text FROM meta.query_history` through your `execute()`.
+
 ---
 
 ## The 90-second demo (the "wow")
 
 1. Log in as **Priya (HR)** → *"average salary by department"* → clean chart. ✅
 2. Log in as **Gokul (Engineering)** → same question → *"You're on Engineering — I can't access HR data."* 🚫
-3. As Gokul → *"show me riders' phone numbers"* → *"Phone numbers are masked. Here's the count instead."* 🎭
+3. As Gokul → *"show me riders' phone numbers"* → phone values masked, count still works. 🎭
 4. *"avg riders Airport→Downtown"* → chart in a few seconds. 📊
 5. Switch to the **Auditor** view → every question, every SQL, every table touched, every block — hash-verified. 📓
 
@@ -223,6 +275,7 @@ I'd rather be upfront than oversell:
 
 - **No auth yet.** The API trusts the `user` field you send it. In a real deployment this sits behind SSO (Keycloak or similar). Until then: demo only.
 - **When there's no native DB security, the firewall *is* the security boundary.** On a warehouse like Snowflake you ride on its built-in row/column security. On something like MySQL or Hive, a single parsing gap in the firewall is a data breach — so that's where the real engineering rigor goes, and why it's the one component with adversarial tests.
+- **The Postgres connector hasn't been tested against a real Postgres instance yet** — just the interface and FK introspection logic. If you wire it up and hit something broken, the path to fix is short: one file in `src/atlas/connector/`.
 - **The audit log is tamper-*evident*, not tamper-*proof*.** The hash chain makes edits/deletions detectable, but someone with full DB access could recompute the whole chain. A real build would use an immutable store (immudb, QLDB).
 - **Sub-5-second answers aren't guaranteed on cold, huge scans** — that time belongs to the database, not to Atlas.
 - **The novel part is the governance shell, not text-to-SQL itself.** Tools like WrenAI, Vanna, and Dataherald already do the text-to-SQL well. What I care about here is the *governance* around it: per-user map scoping, the firewall, and the audit trail.
