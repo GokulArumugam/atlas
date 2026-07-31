@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY pyproject.toml README.md LICENSE ./
+COPY src/ src/
+COPY tests/ tests/
+COPY static/ static/
+COPY docs/ docs/
+COPY scripts/ scripts/
+
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir '.[dev]' \
+ && mkdir -p data
+
+CMD ["pytest", "-q"]

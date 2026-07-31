@@ -62,6 +62,23 @@ class PolicyEngine:
 
     def masking_expr(self, column: ColumnRef) -> str:
         # The caller may only substitute this after receiving a MASK verdict.
+        # Per-column overrides let policies emit type-safe masks (e.g. NULL for
+        # numerics so UNION with unmasked numeric columns still typechecks).
+        overrides = self.config.get("column_masking_expressions", {})
+        key = self._column_key(column)
+        if key in overrides:
+            return overrides[key]
+        column_types = self.config.get("column_types", {})
+        col_type = column_types.get(key)
+        if col_type is not None:
+            if col_type in {"int", "bigint", "float", "double", "decimal", "numeric"}:
+                return "NULL"
+            if col_type == "date":
+                return "CAST(NULL AS DATE)"
+            if col_type == "timestamp":
+                return "CAST(NULL AS TIMESTAMP)"
+            if col_type == "bool":
+                return "CAST(NULL AS BOOLEAN)"
         return self.config.get("masking_expression", "'***MASKED***'")
 
     def catalog_tables(self) -> dict:

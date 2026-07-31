@@ -35,10 +35,17 @@ class WarehouseConnector(ABC):
     def execute(self, sql: str, params: list[Any] | None = None) -> tuple[list[str], list[tuple]]:
         """Run a read-only SQL statement; return (column_names, rows)."""
 
-    def query_history(self) -> list[str]:
-        """Return historical SQL strings for join-graph mining."""
+    def query_history(self, limit: int = 500) -> list[str]:
+        """Return historical SQL strings for join-graph mining.
+
+        Bounded by `limit` (most recent by rowid/insertion order) so a warehouse
+        with millions of historical statements doesn't stall Atlas at startup.
+        """
         try:
-            _, rows = self.execute("SELECT sql_text FROM meta.query_history")
+            limit = max(1, int(limit))
+            _, rows = self.execute(
+                f"SELECT sql_text FROM meta.query_history LIMIT {limit}"
+            )
             return [row[0] for row in rows]
         except Exception:
             return []

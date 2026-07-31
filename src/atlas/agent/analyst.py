@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import date, datetime
 from numbers import Number
@@ -9,6 +10,7 @@ from time import perf_counter
 
 from atlas.agent.generator import SqlGenerator, UnsupportedQuestion, default_generator
 from atlas.audit.audit import AuditLog
+from atlas.cache import TTLLRUCache
 from atlas.catalog.catalog import Catalog
 from atlas.catalog.context import build_context
 from atlas.catalog.mindmap import MindMap
@@ -49,6 +51,9 @@ class Analyst:
         connector: WarehouseConnector,
         audit_path: str = "data/audit.duckdb",
         generator: SqlGenerator | None = None,
+        *,
+        sql_cache_size: int = 512,
+        sql_cache_ttl_seconds: float = 300.0,
     ) -> None:
         self.connector = connector
         self.policy = PolicyEngine()
@@ -58,9 +63,28 @@ class Analyst:
         self.firewall = SqlFirewall(self.policy, dialect=connector.dialect)
         self.generator = generator or default_generator()
         self.audit = AuditLog(audit_path)
+        # (user_scope_hash, normalized_question) -> generated SQL text.
+        # We cache the *generator output* not the *executed rows* — rows can
+        # change under the caller, but the SQL is a pure function of scope +
+        # question. The firewall still runs on every hit.
+        self._sql_cache: TTLLRUCache[tuple[str, str], str] = TTLLRUCache(
+            max_size=sql_cache_size, ttl_seconds=sql_cache_ttl_seconds
+        )
 
-    def ask(self, user: str, question: str) -> AnalystAnswer:
-        """Answer one question without ever executing unapproved generator SQL."""
+    def ask(
+        self,
+        user: str,
+        question: str,
+        *,
+        generator: SqlGenerator | None = None,
+    ) -> AnalystAnswer:
+        """Answer one question without ever executing unapproved generator SQL.
+
+        ``generator`` optionally overrides the default generator for this call —
+        used by the API when the caller supplies a provider profile or an
+        ephemeral provider config.
+        """
+        active_generator = generator or self.generator
         started = perf_counter()
         latency_ms: dict[str, int] = {"context": 0, "generate": 0, "firewall": 0, "execute": 0, "total": 0}
 
@@ -71,31 +95,37 @@ class Analyst:
 
         generated_sql: str | None = None
         generation_started = perf_counter()
-        try:
-            generated_sql = self.generator.generate(user, question, context)
-        except Exception as error:
-            # A known "I don't understand that question" and an unexpected generator
-            # failure both end the same way: a clean denial, nothing executed.
-            reason = (
-                str(error)
-                if isinstance(error, UnsupportedQuestion)
-                else "I couldn't generate a safe query for that question."
-            )
-            latency_ms["generate"] = _elapsed_ms(generation_started)
-            latency_ms["total"] = _elapsed_ms(started)
-            return self._audited_answer(
-                user=user,
-                question=question,
-                mermaid=mermaid,
-                generated_sql=None,
-                result=None,
-                decision=Decision.DENY,
-                reason=reason,
-                columns=[],
-                rows=[],
-                chart=None,
-                latency_ms=latency_ms,
-            )
+        cache_key = self._cache_key(user, question)
+        cached_sql = self._sql_cache.get(cache_key)
+        if cached_sql is not None:
+            generated_sql = cached_sql
+        else:
+            try:
+                generated_sql = active_generator.generate(user, question, context)
+                self._sql_cache.set(cache_key, generated_sql)
+            except Exception as error:
+                # A known "I don't understand that question" and an unexpected generator
+                # failure both end the same way: a clean denial, nothing executed.
+                reason = (
+                    str(error)
+                    if isinstance(error, UnsupportedQuestion)
+                    else "I couldn't generate a safe query for that question."
+                )
+                latency_ms["generate"] = _elapsed_ms(generation_started)
+                latency_ms["total"] = _elapsed_ms(started)
+                return self._audited_answer(
+                    user=user,
+                    question=question,
+                    mermaid=mermaid,
+                    generated_sql=None,
+                    result=None,
+                    decision=Decision.DENY,
+                    reason=reason,
+                    columns=[],
+                    rows=[],
+                    chart=None,
+                    latency_ms=latency_ms,
+                )
         latency_ms["generate"] = _elapsed_ms(generation_started)
 
         firewall_started = perf_counter()
@@ -165,6 +195,21 @@ class Analyst:
     def _execute_safe_sql(self, safe_sql: str) -> tuple[list[str], list[tuple]]:
         """Run exactly the firewall-approved SQL through the warehouse connector."""
         return self.connector.execute(safe_sql)
+
+    def _cache_key(self, user: str, question: str) -> tuple[str, str]:
+        """Cache key that binds to the user's *scope*, not just their username.
+
+        Two users with identical scope share cache entries; a scope change on
+        the same user invalidates their entries automatically.
+        """
+        scope = self.policy.visible_tables(user)
+        scope_bytes = "|".join(sorted(f"{t.schema}.{t.table}" for t in scope)).encode("utf-8")
+        scope_hash = hashlib.sha256(scope_bytes).hexdigest()[:16]
+        normalized = " ".join(question.strip().lower().split())
+        return scope_hash, normalized
+
+    def cache_stats(self) -> dict:
+        return self._sql_cache.stats()
 
     def _audited_answer(
         self,

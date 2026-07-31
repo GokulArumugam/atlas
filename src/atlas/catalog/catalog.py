@@ -92,11 +92,21 @@ class Catalog:
             """
         )
         counts: dict[TableRef, int] = {}
-        for schema, table in table_rows:
-            _, count_rows = self.connector.execute(
-                f"SELECT COUNT(*) FROM {_qualified(schema, table)}"
-            )
-            counts[TableRef(schema, table)] = count_rows[0][0]
+        if table_rows:
+            # Batch every COUNT(*) into a single UNION ALL query so we pay one
+            # planner + one round-trip instead of N. For very large table sets
+            # (>500), we chunk to keep the SQL text manageable.
+            batch_size = 200
+            for start in range(0, len(table_rows), batch_size):
+                chunk = table_rows[start : start + batch_size]
+                union_parts = [
+                    f"SELECT '{schema}' AS s, '{table}' AS t, COUNT(*) AS c "
+                    f"FROM {_qualified(schema, table)}"
+                    for schema, table in chunk
+                ]
+                _, count_rows = self.connector.execute(" UNION ALL ".join(union_parts))
+                for schema, table, count in count_rows:
+                    counts[TableRef(schema, table)] = int(count)
 
         columns_by_table: dict[TableRef, list[ColumnInfo]] = {ref: [] for ref in counts}
         for schema, table, column, data_type in col_rows:

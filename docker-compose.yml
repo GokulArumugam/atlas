@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   atlas:
     build: .
@@ -7,25 +5,39 @@ services:
     ports:
       - "${ATLAS_PORT:-8000}:${ATLAS_PORT:-8000}"
     volumes:
-      # Persist the generated DuckDB files so the warehouse and audit log
-      # survive container restarts without re-generating from scratch.
+      # Persist DuckDB warehouse + audit log across restarts.
       - atlas-data:/app/data
     environment:
       ATLAS_HOST: "0.0.0.0"
       ATLAS_PORT: "${ATLAS_PORT:-8000}"
-      # Drop your key here (or in a .env file) to activate the real Claude LLM.
+      ATLAS_AUTH_MODE: "${ATLAS_AUTH_MODE:-enforced}"
+      ATLAS_RATE_LIMIT_PER_MINUTE: "${ATLAS_RATE_LIMIT_PER_MINUTE:-30}"
+      ATLAS_ALLOWED_ORIGINS: "${ATLAS_ALLOWED_ORIGINS:-}"
+      ATLAS_LOG_LEVEL: "${ATLAS_LOG_LEVEL:-INFO}"
+      ATLAS_LOG_JSON: "${ATLAS_LOG_JSON:-true}"
+      ATLAS_KEY_PEPPER: "${ATLAS_KEY_PEPPER:-}"
+      ATLAS_DEFAULT_LLM_PROVIDER: "${ATLAS_DEFAULT_LLM_PROVIDER:-ollama}"
+      ATLAS_OLLAMA_BASE_URL: "${ATLAS_OLLAMA_BASE_URL:-http://ollama:11434}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile: 4096
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1g
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/users')",
-        ]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
       start_period: 20s
 

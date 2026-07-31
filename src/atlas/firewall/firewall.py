@@ -173,7 +173,7 @@ class SqlFirewall:
                     protected = origins & protected_columns
                     if not protected or self._projection_is_aggregate_only(projection, scope, scope_by_expression):
                         continue
-                    self._mask_projection(projection)
+                    self._mask_projection(projection, next(iter(sorted(protected, key=str))))
                     masked_columns.extend(sorted(protected, key=str))
 
             masked_columns = self._unique(masked_columns)
@@ -378,8 +378,18 @@ class SqlFirewall:
                     return False
         return found_column
 
-    def _mask_projection(self, projection: exp.Expression) -> None:
-        masking_expression = sqlglot.parse_one(self.policy.masking_expr(ColumnRef("", "", "")), read=self.dialect)
+    def _mask_projection(self, projection: exp.Expression, protected_column: "ColumnRef | None" = None) -> None:
+        col = protected_column if protected_column is not None else ColumnRef("", "", "")
+        masking_sql = self.policy.masking_expr(col)
+        cached = getattr(self, "_masking_cache", None)
+        if cached is None:
+            cached = {}
+            self._masking_cache = cached
+        template = cached.get(masking_sql)
+        if template is None:
+            template = sqlglot.parse_one(masking_sql, read=self.dialect)
+            cached[masking_sql] = template
+        masking_expression = template.copy()
         if isinstance(projection, exp.Alias):
             projection.set("this", masking_expression)
         else:

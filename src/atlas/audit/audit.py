@@ -1,18 +1,23 @@
 """An append-only audit log with a SHA-256 hash chain you can verify.
 
-The audit database is kept separate from the warehouse on purpose — the agent
-only ever *reads* the warehouse, and only ever *writes* here. The hash chain
-means if someone quietly edits or deletes a row later, a verifier will notice.
+Efficiency notes:
+* One persistent DuckDB connection is kept for writes; reads use per-call
+  cursors. This eliminates the fresh file-open cost that used to happen on
+  every /api/ask.
+* `touching_schema` now filters in SQL instead of loading every row into
+  Python.
+* `verify_chain` streams rows in batches — memory-flat regardless of size.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
+import threading
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from uuid import uuid4
 
 import duckdb
@@ -43,99 +48,23 @@ class AuditEntry:
 
 
 class AuditLog:
-    """Persist audit entries and detect any subsequent modification.
-
-    This is append-only by application convention.  The chain makes a direct
-    database update or deletion evident to a verifier, even though DuckDB does
-    not itself provide an immutable-table primitive.
-    """
+    """Persist audit entries and detect any subsequent modification."""
 
     def __init__(self, db_path: str = "data/audit.duckdb") -> None:
         self.db_path = str(db_path)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._conn: duckdb.DuckDBPyConnection | None = None
+        self._lock = threading.Lock()
         self._initialize()
 
-    def record(self, **fields: Any) -> AuditEntry:
-        """Append one entry and return its fully hashed representation."""
-        payload = self._normalise_fields(fields)
-        connection = duckdb.connect(self.db_path)
-        try:
-            previous = connection.execute(
-                f"SELECT sequence, entry_hash FROM {_TABLE} ORDER BY sequence DESC LIMIT 1"
-            ).fetchone()
-            sequence = (int(previous[0]) + 1) if previous else 1
-            prev_hash = str(previous[1]) if previous else _GENESIS_HASH
-            entry_hash = _hash(prev_hash, payload)
-            entry = AuditEntry(prev_hash=prev_hash, entry_hash=entry_hash, **payload)
-            connection.execute(
-                f"""
-                INSERT INTO {_TABLE} (
-                    sequence, audit_id, ts, username, team, question, generated_sql,
-                    executed_sql, decision, reason, tables_touched, columns_touched,
-                    masked_columns, row_count, latency_ms, prev_hash, entry_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    sequence, entry.audit_id, entry.ts, entry.user, entry.team,
-                    entry.question, entry.generated_sql, entry.executed_sql,
-                    entry.decision, entry.reason, _canonical_json(entry.tables_touched),
-                    _canonical_json(entry.columns_touched), _canonical_json(entry.masked_columns),
-                    entry.row_count, _canonical_json(entry.latency_ms), entry.prev_hash,
-                    entry.entry_hash,
-                ],
-            )
-            return entry
-        finally:
-            connection.close()
-
-    def all(self, limit: int = 100) -> list[AuditEntry]:
-        """Return newest entries first, bounded to a safe positive limit."""
-        limit = max(0, int(limit))
-        if limit == 0:
-            return []
-        return self._read_entries(
-            f"SELECT {self._select_columns()} FROM {_TABLE} ORDER BY sequence DESC LIMIT ?", [limit]
-        )
-
-    def for_user(self, user: str) -> list[AuditEntry]:
-        return self._read_entries(
-            f"SELECT {self._select_columns()} FROM {_TABLE} WHERE username = ? ORDER BY sequence DESC",
-            [user],
-        )
-
-    def touching_schema(self, schema: str) -> list[AuditEntry]:
-        """Return entries whose resolved table or column lineage touches *schema*."""
-        prefix = f"{schema.lower()}."
-        return [
-            entry for entry in self.all(limit=1_000_000)
-            if any(item.lower().startswith(prefix) for item in entry.tables_touched + entry.columns_touched)
-        ]
-
-    def verify_chain(self) -> tuple[bool, str]:
-        """Recompute every link and report the first evidence of tampering."""
-        connection = duckdb.connect(self.db_path, read_only=True)
-        try:
-            rows = connection.execute(
-                f"SELECT {self._select_columns()} FROM {_TABLE} ORDER BY sequence ASC"
-            ).fetchall()
-        finally:
-            connection.close()
-
-        expected_prev = _GENESIS_HASH
-        for index, row in enumerate(rows, start=1):
-            entry = self._entry_from_row(row)
-            if entry.prev_hash != expected_prev:
-                return False, f"Audit chain tampering detected at entry {entry.audit_id}: previous hash mismatch."
-            calculated = _hash(entry.prev_hash, self._payload_from_entry(entry))
-            if entry.entry_hash != calculated:
-                return False, f"Audit chain tampering detected at entry {entry.audit_id}: entry hash mismatch."
-            expected_prev = entry.entry_hash
-        return True, f"Audit chain verified ({len(rows)} entries)."
+    def _connection(self) -> duckdb.DuckDBPyConnection:
+        if self._conn is None:
+            self._conn = duckdb.connect(self.db_path)
+        return self._conn
 
     def _initialize(self) -> None:
-        connection = duckdb.connect(self.db_path)
-        try:
-            connection.execute(
+        with self._lock:
+            self._connection().execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS {_TABLE} (
                     sequence BIGINT PRIMARY KEY,
@@ -158,8 +87,103 @@ class AuditLog:
                 )
                 """
             )
-        finally:
-            connection.close()
+
+    def record(self, **fields: Any) -> AuditEntry:
+        """Append one entry and return its fully hashed representation."""
+
+        payload = self._normalise_fields(fields)
+        with self._lock:
+            conn = self._connection()
+            previous = conn.execute(
+                f"SELECT sequence, entry_hash FROM {_TABLE} ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()
+            sequence = (int(previous[0]) + 1) if previous else 1
+            prev_hash = str(previous[1]) if previous else _GENESIS_HASH
+            entry_hash = _hash(prev_hash, payload)
+            entry = AuditEntry(prev_hash=prev_hash, entry_hash=entry_hash, **payload)
+            conn.execute(
+                f"""
+                INSERT INTO {_TABLE} (
+                    sequence, audit_id, ts, username, team, question, generated_sql,
+                    executed_sql, decision, reason, tables_touched, columns_touched,
+                    masked_columns, row_count, latency_ms, prev_hash, entry_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    sequence, entry.audit_id, entry.ts, entry.user, entry.team,
+                    entry.question, entry.generated_sql, entry.executed_sql,
+                    entry.decision, entry.reason, _canonical_json(entry.tables_touched),
+                    _canonical_json(entry.columns_touched), _canonical_json(entry.masked_columns),
+                    entry.row_count, _canonical_json(entry.latency_ms), entry.prev_hash,
+                    entry.entry_hash,
+                ],
+            )
+            return entry
+
+    def all(self, limit: int = 100) -> list[AuditEntry]:
+        limit = max(0, int(limit))
+        if limit == 0:
+            return []
+        return self._read_entries(
+            f"SELECT {self._select_columns()} FROM {_TABLE} ORDER BY sequence DESC LIMIT ?", [limit]
+        )
+
+    def for_user(self, user: str) -> list[AuditEntry]:
+        return self._read_entries(
+            f"SELECT {self._select_columns()} FROM {_TABLE} WHERE username = ? ORDER BY sequence DESC",
+            [user],
+        )
+
+    def touching_schema(self, schema: str) -> list[AuditEntry]:
+        """Return entries whose lineage touches *schema* — filter pushed to SQL."""
+
+        pattern = f"{schema.lower()}.%"
+        return self._read_entries(
+            f"""
+            SELECT {self._select_columns()}
+            FROM {_TABLE}
+            WHERE lower(tables_touched) LIKE ? OR lower(columns_touched) LIKE ?
+            ORDER BY sequence DESC
+            """,
+            [f'%"{pattern}%', f'%"{pattern}%'],
+        )
+
+    def verify_chain(self, batch_size: int = 500) -> tuple[bool, str]:
+        """Recompute every link — batched, so memory is flat regardless of size."""
+
+        expected_prev = _GENESIS_HASH
+        total = 0
+        with self._lock:
+            for entry in self._stream_entries(batch_size):
+                total += 1
+                if entry.prev_hash != expected_prev:
+                    return False, (
+                        f"Audit chain tampering detected at entry {entry.audit_id}: "
+                        "previous hash mismatch."
+                    )
+                calculated = _hash(entry.prev_hash, self._payload_from_entry(entry))
+                if entry.entry_hash != calculated:
+                    return False, (
+                        f"Audit chain tampering detected at entry {entry.audit_id}: "
+                        "entry hash mismatch."
+                    )
+                expected_prev = entry.entry_hash
+        return True, f"Audit chain verified ({total} entries)."
+
+    def _stream_entries(self, batch_size: int) -> Iterator[AuditEntry]:
+        conn = self._connection()
+        offset = 0
+        while True:
+            rows = conn.execute(
+                f"SELECT {self._select_columns()} FROM {_TABLE} "
+                "ORDER BY sequence ASC LIMIT ? OFFSET ?",
+                [batch_size, offset],
+            ).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                yield self._entry_from_row(row)
+            offset += len(rows)
 
     @staticmethod
     def _select_columns() -> str:
@@ -169,11 +193,8 @@ class AuditLog:
         )
 
     def _read_entries(self, sql: str, params: list[Any]) -> list[AuditEntry]:
-        connection = duckdb.connect(self.db_path, read_only=True)
-        try:
-            rows = connection.execute(sql, params).fetchall()
-        finally:
-            connection.close()
+        with self._lock:
+            rows = self._connection().execute(sql, params).fetchall()
         return [self._entry_from_row(row) for row in rows]
 
     @staticmethod
@@ -226,6 +247,13 @@ class AuditLog:
             "masked_columns": entry.masked_columns, "row_count": entry.row_count,
             "latency_ms": entry.latency_ms,
         }
+
+    def close(self) -> None:
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            finally:
+                self._conn = None
 
 
 def _string_list(values: Any) -> list[str]:
