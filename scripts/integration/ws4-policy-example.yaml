@@ -1,0 +1,20 @@
+tables:
+  rides:
+    trips: [id, rider_id, driver_id, start_location_id, end_location_id, trip_date, rider_count, fare_amount, status]
+    drivers: [id, full_name, phone, rating, city]
+    riders: [id, full_name, phone, email, home_city]
+    locations: [id, name, city]
+pii_columns:
+  - rides.riders.phone
+  - rides.riders.email
+  - rides.drivers.phone
+users:
+  analyst:
+    team: analytics
+    visible_tables: [rides.trips]
+    unmasked_pii: []
+    row_predicates:
+      rides.trips: "status = 'completed'"
+  admin:
+    team: admin
+    visible_tables: [rides.trips]

@@ -183,6 +183,11 @@ class SqlFirewall:
                 if decision is Decision.MASK
                 else "This read-only query is permitted for your role."
             )
+            # WS4.2 row-level security: wrap each concrete base table with a
+            # subquery that applies the user's row predicate for that table.
+            # This runs AFTER qualification so aliases in the original query
+            # are already resolved and we can preserve them.
+            self._apply_row_predicates(qualified, user)
             return FirewallResult(
                 decision=decision,
                 reason=reason,
@@ -377,6 +382,46 @@ class SqlFirewall:
                 ):
                     return False
         return found_column
+
+    def _apply_row_predicates(self, expression: exp.Expression, user: str) -> None:
+        """Inject row-level policy predicates by wrapping tables in a subquery.
+
+        For every ``exp.Table`` node that references a real base table (not a
+        CTE) and for which the user has a configured row predicate, replace
+        the node with::
+
+            (SELECT * FROM <schema>.<table> WHERE <predicate>) AS <original_alias>
+
+        The original alias is preserved so downstream column references keep
+        resolving. If the table had no alias, we use the raw table name as the
+        alias — SQLGlot emits that cleanly for every dialect we support.
+        """
+
+        cte_names = {
+            cte.alias_or_name.lower()
+            for cte in expression.find_all(exp.CTE)
+            if cte.alias_or_name
+        }
+        for table_node in list(expression.find_all(exp.Table)):
+            name = table_node.name.lower()
+            schema = table_node.db.lower()
+            if not schema or name in cte_names:
+                continue
+            predicate_sql = self.policy.row_predicate_for(user, TableRef(schema, name))
+            if not predicate_sql:
+                continue
+            alias = table_node.alias_or_name
+            try:
+                predicate_expr = sqlglot.parse_one(
+                    f"SELECT * FROM {schema}.{name} WHERE {predicate_sql}",
+                    read=self.dialect,
+                )
+            except SqlglotError:
+                # A malformed predicate must NOT silently allow — raise so
+                # the outer exception handler in `check` denies.
+                raise _Unresolvable(f"invalid row predicate for {schema}.{name}")
+            subquery = exp.Subquery(this=predicate_expr, alias=exp.TableAlias(this=exp.to_identifier(alias)))
+            table_node.replace(subquery)
 
     def _mask_projection(self, projection: exp.Expression, protected_column: "ColumnRef | None" = None) -> None:
         col = protected_column if protected_column is not None else ColumnRef("", "", "")

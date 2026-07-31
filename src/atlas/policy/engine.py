@@ -7,13 +7,28 @@ unknown table, unknown column all get a "no."
 
 from __future__ import annotations
 
+from .loader import get_policy_loader
 from .model import ColumnRef, Decision, TableRef, Verdict, display_name
 from .policies import POLICY_CONFIG
 
 
 class PolicyEngine:
     def __init__(self, config: dict | None = None) -> None:
-        self.config = POLICY_CONFIG if config is None else config
+        self._explicit_config = config
+
+    @property
+    def config(self) -> dict:
+        """Return the current effective config. Hot-reloads from disk when
+        ``ATLAS_POLICY_FILE`` is set and the file mtime has changed."""
+
+        if self._explicit_config is not None:
+            return self._explicit_config
+        loader = get_policy_loader()
+        if loader is not None:
+            loaded = loader.get()
+            if loaded is not None:
+                return loaded
+        return POLICY_CONFIG
 
     def users(self) -> list[str]:
         return list(self.config.get("users", {}).keys())
@@ -92,6 +107,20 @@ class PolicyEngine:
 
     def is_pii(self, column: ColumnRef) -> bool:
         return self._column_key(column) in self.config.get("pii_columns", set())
+
+    def row_predicate_for(self, user: str, table: TableRef) -> str | None:
+        """Return the SQL predicate (WHERE fragment) enforced for this user
+        against this table, or None when no predicate applies.
+
+        The predicate is user-authored SQL and is injected into the query by
+        the firewall. It must reference the target table by its (potentially
+        aliased) real name — the firewall handles the aliasing.
+        """
+        user_config = self._user_config(user)
+        if not user_config:
+            return None
+        predicates = user_config.get("row_predicates") or {}
+        return predicates.get((table.schema, table.table))
 
     def _user_config(self, user: str) -> dict | None:
         return self.config.get("users", {}).get(user)
