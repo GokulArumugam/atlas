@@ -7,6 +7,10 @@ Efficiency notes:
 * `touching_schema` now filters in SQL instead of loading every row into
   Python.
 * `verify_chain` streams rows in batches — memory-flat regardless of size.
+
+If ``ATLAS_WORM_AUDIT_DIR`` is configured, every recorded entry is *also*
+persisted to an append-only WORM sink (see ``atlas.audit.worm``) providing
+defence-in-depth against tampering with the DuckDB file directly.
 """
 
 from __future__ import annotations
@@ -118,6 +122,15 @@ class AuditLog:
                     entry.entry_hash,
                 ],
             )
+            # WS4.5 WORM: mirror to an append-only sink if configured.
+            from atlas.audit.worm import get_worm_sink
+            worm = get_worm_sink()
+            if worm is not None:
+                try:
+                    worm.write(entry, sequence)
+                except Exception:
+                    # Do not fail the primary write if the WORM sink hiccups.
+                    pass
             return entry
 
     def all(self, limit: int = 100) -> list[AuditEntry]:

@@ -113,6 +113,7 @@ def _normalize(raw: dict) -> dict:
             "visible_tables": visible,
             "unmasked_pii": unmasked,
             "row_predicates": row_predicates,
+            "cost_limits": dict(entry.get("cost_limits") or {}),
         }
 
     return {
@@ -122,6 +123,7 @@ def _normalize(raw: dict) -> dict:
         "column_types": column_types,
         "column_masking_expressions": column_masks,
         "masking_expression": raw.get("masking_expression", "'***MASKED***'"),
+        "default_cost_limits": dict(raw.get("default_cost_limits") or {}),
     }
 
 

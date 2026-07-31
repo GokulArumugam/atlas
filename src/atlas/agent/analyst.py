@@ -16,6 +16,8 @@ from atlas.catalog.context import build_context
 from atlas.catalog.mindmap import MindMap
 from atlas.connector.base import WarehouseConnector
 from atlas.firewall.firewall import FirewallResult, SqlFirewall
+from atlas.observability.otel import get_tracer
+from atlas.policy.cost import CostEstimator, check_cost, limits_for_user
 from atlas.policy.engine import PolicyEngine
 from atlas.policy.model import Decision
 
@@ -61,6 +63,7 @@ class Analyst:
         self.mindmap = MindMap(self.catalog)
         self.mindmap.build(connector)
         self.firewall = SqlFirewall(self.policy, dialect=connector.dialect)
+        self.cost_estimator = CostEstimator(connector)
         self.generator = generator or default_generator()
         self.audit = AuditLog(audit_path)
         # (user_scope_hash, normalized_question) -> generated SQL text.
@@ -84,6 +87,22 @@ class Analyst:
         used by the API when the caller supplies a provider profile or an
         ephemeral provider config.
         """
+        with get_tracer().start_as_current_span("atlas.analyst.ask") as span:
+            span.set_attribute("atlas.user", user)
+            span.set_attribute("atlas.question_length", len(question))
+            answer = self._ask_inner(user, question, generator=generator)
+            span.set_attribute("atlas.decision", answer.decision.value)
+            span.set_attribute("atlas.rows", len(answer.rows))
+            span.set_attribute("atlas.audit_id", answer.audit_id)
+            return answer
+
+    def _ask_inner(
+        self,
+        user: str,
+        question: str,
+        *,
+        generator: SqlGenerator | None = None,
+    ) -> AnalystAnswer:
         active_generator = generator or self.generator
         started = perf_counter()
         latency_ms: dict[str, int] = {"context": 0, "generate": 0, "firewall": 0, "execute": 0, "total": 0}
@@ -165,6 +184,30 @@ class Analyst:
                 chart=None,
                 latency_ms=latency_ms,
             )
+
+        # WS4.3 cost check: run EXPLAIN on the firewall-approved SQL and
+        # compare against the user's policy limits. This is a best-effort
+        # gate; unknown estimates never block. Only DENY when we have a
+        # concrete over-limit estimate.
+        limits = limits_for_user(self.policy.config, user)
+        if limits:
+            estimate = self.cost_estimator.estimate(safe_sql)
+            verdict = check_cost(estimate, limits)
+            if not verdict.allowed:
+                latency_ms["total"] = _elapsed_ms(started)
+                return self._audited_answer(
+                    user=user,
+                    question=question,
+                    mermaid=mermaid,
+                    generated_sql=generated_sql,
+                    result=result,
+                    decision=Decision.DENY,
+                    reason=verdict.reason,
+                    columns=[],
+                    rows=[],
+                    chart=None,
+                    latency_ms=latency_ms,
+                )
 
         execution_started = perf_counter()
         columns: list[str] = []
