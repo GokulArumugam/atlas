@@ -7,7 +7,7 @@ COPY pyproject.toml README.md LICENSE ./
 COPY src/ src/
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
- && /opt/venv/bin/pip install --no-cache-dir .
+ && /opt/venv/bin/pip install --no-cache-dir '.[postgres]'
 
 
 FROM python:3.11-slim AS runtime

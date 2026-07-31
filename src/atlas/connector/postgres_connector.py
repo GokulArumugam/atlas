@@ -41,11 +41,17 @@ WHERE tc.constraint_type = 'FOREIGN KEY'
 """
 
 
-_READ_ONLY_SETUP = (
+_READ_ONLY_SETUP_TEMPLATE = (
     "SET SESSION default_transaction_read_only = on;"
-    "SET SESSION statement_timeout = %(timeout_ms)s;"
+    "SET SESSION statement_timeout = {timeout_ms};"
     "SET SESSION idle_in_transaction_session_timeout = 60000;"
 )
+
+
+def _read_only_setup_sql(timeout_ms: int) -> str:
+    # `SET` doesn't support bind parameters in Postgres, so we interpolate
+    # the timeout as a literal integer. `timeout_ms` is int-coerced upstream.
+    return _READ_ONLY_SETUP_TEMPLATE.format(timeout_ms=int(timeout_ms))
 
 
 class PostgresConnector(WarehouseConnector):
@@ -154,7 +160,7 @@ class _Psycopg3PoolAdapter(_PoolAdapter):
     def borrow(self) -> Iterator[Any]:
         with self._pool.connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(_READ_ONLY_SETUP, {"timeout_ms": self._timeout_ms})
+                cursor.execute(_read_only_setup_sql(self._timeout_ms))
             yield conn
 
     def close(self) -> None:
@@ -181,7 +187,7 @@ class _Psycopg2PoolAdapter(_PoolAdapter):
         conn = self._psycopg2.connect(self._dsn)
         conn.autocommit = True
         with conn.cursor() as cursor:
-            cursor.execute(_READ_ONLY_SETUP, {"timeout_ms": self._timeout_ms})
+            cursor.execute(_read_only_setup_sql(self._timeout_ms))
         return conn
 
     @contextmanager

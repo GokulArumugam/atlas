@@ -20,6 +20,7 @@ from atlas.observability.otel import get_tracer
 from atlas.policy.cost import CostEstimator, check_cost, limits_for_user
 from atlas.policy.engine import PolicyEngine
 from atlas.policy.model import Decision
+from atlas.semantic import get_metric_registry
 
 
 @dataclass
@@ -116,7 +117,13 @@ class Analyst:
         generation_started = perf_counter()
         cache_key = self._cache_key(user, question)
         cached_sql = self._sql_cache.get(cache_key)
-        if cached_sql is not None:
+        # WS5.1 semantic layer: if the question matches a curated metric, use
+        # its SQL directly. Metrics beat cache and generator — they represent
+        # a human-signed-off correct answer.
+        matched_metric = get_metric_registry().find(question)
+        if matched_metric is not None:
+            generated_sql = matched_metric.sql
+        elif cached_sql is not None:
             generated_sql = cached_sql
         else:
             try:
@@ -301,15 +308,39 @@ class Analyst:
     @staticmethod
     def _chart_for(question: str, columns: list[str], rows: list[tuple]) -> dict:
         title = question.strip() or "Query result"
+        base = {"mark": "table", "x": None, "y": None, "title": title, "vega_lite": None}
         if len(columns) == 1 and len(rows) == 1:
-            return {"mark": "value", "x": None, "y": columns[0], "title": title}
+            base.update({"mark": "value", "x": None, "y": columns[0]})
+            return base
         if len(columns) == 2 and rows:
             x_value, y_value = rows[0]
             if _is_date(x_value) or "date" in columns[0].lower():
-                return {"mark": "line", "x": columns[0], "y": columns[1], "title": title}
+                spec = {
+                    "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+                    "title": title,
+                    "data": {"values": [{columns[0]: r[0], columns[1]: r[1]} for r in rows]},
+                    "mark": "line",
+                    "encoding": {
+                        "x": {"field": columns[0], "type": "temporal"},
+                        "y": {"field": columns[1], "type": "quantitative"},
+                    },
+                }
+                base.update({"mark": "line", "x": columns[0], "y": columns[1], "vega_lite": spec})
+                return base
             if not isinstance(x_value, (Number, bool)) and isinstance(y_value, Number):
-                return {"mark": "bar", "x": columns[0], "y": columns[1], "title": title}
-        return {"mark": "table", "x": None, "y": None, "title": title}
+                spec = {
+                    "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+                    "title": title,
+                    "data": {"values": [{columns[0]: r[0], columns[1]: r[1]} for r in rows]},
+                    "mark": "bar",
+                    "encoding": {
+                        "x": {"field": columns[0], "type": "nominal"},
+                        "y": {"field": columns[1], "type": "quantitative"},
+                    },
+                }
+                base.update({"mark": "bar", "x": columns[0], "y": columns[1], "vega_lite": spec})
+                return base
+        return base
 
 
 def _elapsed_ms(started: float) -> int:

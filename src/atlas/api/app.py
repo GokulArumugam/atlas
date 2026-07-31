@@ -180,6 +180,55 @@ def metrics(request: Request) -> JSONResponse:
     })
 
 
+@app.get("/api/dashboard")
+def dashboard(request: Request) -> JSONResponse:
+    """Governance dashboard summary: decisions, mask rate, PII exposure attempts.
+
+    Reads only from the audit log — no warehouse access. Requires the
+    ``admin`` or ``audit`` role in enforced mode; open to anonymous callers in
+    disabled mode."""
+    identity = identity_of(request)
+    if identity.source == "api_key" and "admin" not in identity.roles and "audit" not in identity.roles:
+        return _error("Dashboard access requires the 'admin' or 'audit' role.", 403)
+    analyst = state.analyst
+    if analyst is None:
+        return _error("Analyst not ready.", 503)
+    try:
+        entries = analyst.audit.all(limit=10_000)
+        totals = {"allow": 0, "mask": 0, "deny": 0}
+        pii_attempts = 0
+        top_users: dict[str, int] = {}
+        top_denials: list[dict] = []
+        for entry in entries:
+            totals[entry.decision] = totals.get(entry.decision, 0) + 1
+            top_users[entry.user] = top_users.get(entry.user, 0) + 1
+            if entry.masked_columns:
+                pii_attempts += 1
+            if entry.decision == "deny" and len(top_denials) < 20:
+                top_denials.append({
+                    "audit_id": entry.audit_id,
+                    "user": entry.user,
+                    "question": entry.question,
+                    "reason": entry.reason,
+                    "ts": entry.ts,
+                })
+        total = sum(totals.values()) or 1
+        return JSONResponse(content={
+            "total_decisions": total,
+            "decision_counts": totals,
+            "decision_rates": {k: round(v / total, 4) for k, v in totals.items()},
+            "pii_mask_events": pii_attempts,
+            "top_users": sorted(
+                [{"user": u, "count": c} for u, c in top_users.items()],
+                key=lambda x: x["count"], reverse=True,
+            )[:10],
+            "recent_denials": top_denials,
+        })
+    except Exception:
+        logger.exception("dashboard_failed")
+        return _error("Unable to load governance dashboard.")
+
+
 @app.get("/api/users")
 def users(request: Request) -> JSONResponse:
     try:
