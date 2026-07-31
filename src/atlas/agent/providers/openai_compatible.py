@@ -26,12 +26,14 @@ class OpenAICompatibleGenerator:
         api_key: str,
         model: str = "gpt-4o-mini",
         base_url: str = "https://api.openai.com/v1",
+        dialect: str = "duckdb",
     ) -> None:
         if not api_key:
             raise ValueError("api_key is required for OpenAI-compatible providers.")
         self.api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
+        self.dialect = dialect
 
     def generate(self, user: str, question: str, context: str) -> str:
         del user
@@ -40,7 +42,7 @@ class OpenAICompatibleGenerator:
             "temperature": 0.0,
             "max_tokens": 600,
             "messages": [
-                {"role": "system", "content": system_prompt()},
+                {"role": "system", "content": system_prompt(self.dialect)},
                 {"role": "user", "content": build_user_message(context, question)},
             ],
         }).encode("utf-8")

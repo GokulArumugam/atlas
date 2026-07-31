@@ -239,7 +239,7 @@ async def _identity_from_body_or_path(request: Request) -> Identity | None:
         if user_id:
             return Identity(user_id=user_id, source="disabled_mode", display_name=user_id)
 
-    if request.method == "POST" and path == "/api/ask":
+    if request.method == "POST" and path in {"/api/ask", "/api/run-sql"}:
         try:
             payload = await request.json()
         except Exception:

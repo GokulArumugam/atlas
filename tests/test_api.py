@@ -21,7 +21,7 @@ def test_users_expose_the_four_demo_identities() -> None:
     assert response.status_code == 200
     assert response.json() == [
         {"user": "gokul", "team": "engineering"},
-        {"user": "priya", "team": "hr"},
+        {"user": "mitra", "team": "hr"},
         {"user": "arjun", "team": "marketing"},
         {"user": "auditor", "team": "audit"},
     ]
@@ -37,7 +37,7 @@ def test_engineering_cannot_access_hr_salary_data() -> None:
 
 
 def test_hr_can_access_average_salary_data() -> None:
-    response = client.post("/api/ask", json={"user": "priya", "question": "average salary by department"})
+    response = client.post("/api/ask", json={"user": "mitra", "question": "average salary by department"})
     assert response.status_code == 200
     answer = response.json()
     assert answer["decision"] == "allow"
@@ -69,8 +69,8 @@ def test_graph_is_scoped_for_gokul() -> None:
     assert "hr." not in response.text.lower()
 
 
-def test_graph_includes_hr_for_priya() -> None:
-    response = client.get("/api/graph/priya")
+def test_graph_includes_hr_for_mitra() -> None:
+    response = client.get("/api/graph/mitra")
     assert response.status_code == 200
     assert "hr." in response.text.lower()
 

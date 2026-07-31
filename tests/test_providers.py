@@ -60,7 +60,7 @@ def test_profile_store_save_and_load(tmp_path: Path):
     assert config.provider == "openai"
 
     # Wrong owner returns None.
-    assert store.load_config("my-openai", owner_user_id="priya") is None
+    assert store.load_config("my-openai", owner_user_id="mitra") is None
 
 
 def test_ephemeral_resolution_builds_generator():

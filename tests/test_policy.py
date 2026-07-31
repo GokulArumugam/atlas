@@ -30,10 +30,10 @@ def test_arjun_cannot_access_riders() -> None:
     assert verdict.decision is Decision.DENY
 
 
-def test_priya_masks_pan_but_can_access_salary() -> None:
+def test_mitra_masks_pan_but_can_access_salary() -> None:
     engine = PolicyEngine()
-    assert engine.check_column("priya", ColumnRef("hr", "employees", "pan")).decision is Decision.MASK
-    assert engine.check_column("priya", ColumnRef("hr", "employees", "salary")).decision is Decision.ALLOW
+    assert engine.check_column("mitra", ColumnRef("hr", "employees", "pan")).decision is Decision.MASK
+    assert engine.check_column("mitra", ColumnRef("hr", "employees", "salary")).decision is Decision.ALLOW
 
 
 def test_unknown_user_fails_closed() -> None:

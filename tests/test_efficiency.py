@@ -46,7 +46,7 @@ def test_touching_schema_sql_pushdown(tmp_path: Path):
         masked_columns=[], row_count=1, latency_ms={},
     )
     audit.record(
-        user="priya", team="hr", question="q2",
+        user="mitra", team="hr", question="q2",
         generated_sql=None, executed_sql="SELECT * FROM hr.employees",
         decision="allow", reason="ok",
         tables_touched=["hr.employees"], columns_touched=["hr.employees.salary"],

@@ -298,12 +298,12 @@ def _query_history(rng: random.Random, reference_date: date) -> list[tuple[int, 
            JOIN hr.departments d ON e.department_id = d.id
            GROUP BY d.name""",
     ]
-    users = [("gokul", "engineering"), ("priya", "hr"), ("arjun", "marketing")]
+    users = [("gokul", "engineering"), ("mitra", "hr"), ("arjun", "marketing")]
     history = []
     for history_id in range(1, 241):
         # Marketing's historical questions remain ride focused; HR may ask either kind.
         user, team = rng.choice(users)
-        candidates = rides_patterns if user != "priya" else rides_patterns + hr_patterns
+        candidates = rides_patterns if user != "mitra" else rides_patterns + hr_patterns
         executed = datetime.combine(
             reference_date - timedelta(days=rng.randrange(120)),
             datetime.min.time(),

@@ -53,6 +53,7 @@ class ProviderConfig:
     model: str | None = None
     api_key: str | None = None
     base_url: str | None = None
+    dialect: str = "duckdb"
 
 
 @dataclass
@@ -95,6 +96,7 @@ def _ollama_factory(config: ProviderConfig) -> Generator:
     return OllamaGenerator(
         base_url=config.base_url or get_settings().ollama_base_url,
         model=config.model or "llama3.1:8b",
+        dialect=config.dialect,
     )
 
 
@@ -105,6 +107,7 @@ def _openai_factory(config: ProviderConfig) -> Generator:
         api_key=config.api_key,
         model=config.model or "gpt-4o-mini",
         base_url=config.base_url or "https://api.openai.com/v1",
+        dialect=config.dialect,
     )
 
 
@@ -114,6 +117,7 @@ def _anthropic_factory(config: ProviderConfig) -> Generator:
     return AnthropicGenerator(
         api_key=config.api_key,
         model=config.model or "claude-3-5-sonnet-latest",
+        dialect=config.dialect,
     )
 
 
@@ -319,18 +323,34 @@ def resolve_generator(
     profile_name: str | None = None,
     ephemeral: ProviderConfig | None = None,
     owner_user_id: str | None = None,
+    dialect: str = "duckdb",
 ) -> Generator:
     """Return the Generator to use for one request.
 
     Priority: ephemeral > profile > server default.
+    ``dialect`` is threaded into the config so the system prompt matches the
+    warehouse the query will actually run against.
     """
 
     if ephemeral is not None:
+        # Respect explicit dialect on ephemeral if the caller set it, else
+        # apply the caller-supplied default from the request handler.
+        if ephemeral.dialect == "duckdb" and dialect != "duckdb":
+            ephemeral = ProviderConfig(
+                provider=ephemeral.provider, model=ephemeral.model,
+                api_key=ephemeral.api_key, base_url=ephemeral.base_url,
+                dialect=dialect,
+            )
         return get_registry().build(ephemeral)
     if profile_name:
         config = get_profile_store().load_config(profile_name, owner_user_id=owner_user_id)
         if config is None:
             raise ValueError(f"No such provider profile: {profile_name}")
+        config = ProviderConfig(
+            provider=config.provider, model=config.model,
+            api_key=config.api_key, base_url=config.base_url,
+            dialect=dialect,
+        )
         return get_registry().build(config)
     # Server default: Ollama.
     settings = get_settings()

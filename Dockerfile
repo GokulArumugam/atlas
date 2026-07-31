@@ -21,7 +21,8 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     ATLAS_ROOT=/app \
     ATLAS_HOST=0.0.0.0 \
-    ATLAS_PORT=8000
+    ATLAS_PORT=8000 \
+    ATLAS_OLLAMA_BASE_URL=http://host.containers.internal:11434
 
 COPY --from=build /opt/venv /opt/venv
 COPY src/ src/

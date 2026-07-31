@@ -112,6 +112,14 @@ class SaveProfileRequest(BaseModel):
     base_url: str | None = Field(default=None, max_length=512)
 
 
+class RunSqlRequest(BaseModel):
+    sql: str = Field(..., min_length=1, max_length=32_000)
+    # Optional label so the audit log carries a human-readable question.
+    label: str | None = Field(default=None, max_length=500)
+    # Legacy body-user for disabled auth mode (matches AskRequest).
+    user: str | None = None
+
+
 def _error(message: str, status_code: int = 500) -> JSONResponse:
     """Return a deliberately plain error response, never an exception detail."""
     return JSONResponse(status_code=status_code, content={"error": message})
@@ -265,19 +273,24 @@ async def ask(payload: AskRequest, request: Request) -> JSONResponse:
         # Optional per-request provider selection.
         override_generator = None
         try:
+            # Pull the analyst's dialect (duckdb/postgres/…) so the model prompt
+            # matches the actual warehouse being queried.
+            active_dialect = _analyst().connector.dialect
             if payload.provider:
                 ephemeral = ProviderConfig(
                     provider=payload.provider,
                     model=payload.model,
                     api_key=payload.api_key,
                     base_url=payload.base_url,
+                    dialect=active_dialect,
                 )
                 override_generator = resolve_generator(
                     ephemeral=ephemeral, owner_user_id=user_id
                 )
             elif payload.provider_profile:
                 override_generator = resolve_generator(
-                    profile_name=payload.provider_profile, owner_user_id=user_id
+                    profile_name=payload.provider_profile, owner_user_id=user_id,
+                    dialect=active_dialect,
                 )
         except ValueError as exc:
             return _error(str(exc), 400)
@@ -291,10 +304,89 @@ async def ask(payload: AskRequest, request: Request) -> JSONResponse:
         return _error("Unable to complete that governed query.")
 
 
+@app.post("/api/run-sql")
+async def run_sql(payload: RunSqlRequest, request: Request) -> JSONResponse:
+    """Execute user-edited SQL through the same firewall + policy + audit path.
+
+    Same governance controls as ``/api/ask``, minus the LLM. The user is
+    authoritative — anything they can't see through their scope will fail the
+    firewall exactly the way an LLM-produced query would.
+    """
+    identity = identity_of(request)
+    try:
+        sql = payload.sql.strip()
+        if not sql:
+            return _error("SQL is required.", 400)
+        # Reuse the identity resolver but with the legacy body-user path.
+        user_id = identity.user_id
+        if not user_id and get_settings().auth_mode == "disabled" and payload.user:
+            user_id = payload.user.strip()
+        if not user_id:
+            return _error("Authenticated identity has no user_id.", 401)
+        label = (payload.label or "").strip()
+        answer = await asyncio.to_thread(
+            _analyst().run_sql, user_id, sql, label
+        )
+        return JSONResponse(content=jsonable_encoder(_answer_payload(answer)))
+    except Exception:
+        logger.exception("run_sql_failed")
+        return _error("Unable to run that SQL.")
+
+
 @app.get("/api/providers")
 def list_providers(request: Request) -> JSONResponse:
     """List all provider names the server knows how to build."""
     return JSONResponse(content={"providers": get_registry().names()})
+
+
+@app.get("/api/providers/ollama/health")
+def ollama_health(request: Request, base_url: str | None = None) -> JSONResponse:
+    """Check whether Ollama is reachable and list available models.
+
+    The `base_url` query param overrides the server default so the SPA can
+    verify the URL the user typed before saving it.
+    """
+    import json as _json
+    from urllib.error import HTTPError, URLError
+    from urllib.request import Request as _Req, urlopen
+
+    url = (base_url or get_settings().ollama_base_url).rstrip("/")
+    try:
+        req = _Req(f"{url}/api/tags", method="GET")
+        with urlopen(req, timeout=5) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+        models = [m.get("name") for m in data.get("models", []) if m.get("name")]
+        return JSONResponse(content={
+            "ok": True,
+            "url": url,
+            "models": models,
+            "message": (
+                f"Connected. {len(models)} model(s) available." if models
+                else "Connected, but no models are pulled yet. Run `ollama pull llama3.2:1b`."
+            ),
+        })
+    except HTTPError as e:
+        return JSONResponse(
+            status_code=200,
+            content={"ok": False, "url": url, "message": f"HTTP {e.code} from Ollama at {url}."},
+        )
+    except URLError as e:
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": False,
+                "url": url,
+                "message": (
+                    f"Can't reach Ollama at {url}. Make sure it's running with `ollama serve`. "
+                    "If Atlas is in a container, try http://host.containers.internal:11434."
+                ),
+            },
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=200,
+            content={"ok": False, "url": url, "message": f"Unexpected error: {e}"},
+        )
 
 
 @app.get("/api/providers/profiles")

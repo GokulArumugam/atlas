@@ -5,53 +5,446 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <title>Atlas — Governed AI Data Analyst</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <div class="app-shell">
-    <aside class="sidebar" aria-label="Workspace navigation">
-      <div class="brand"><span class="brand-mark">A</span><span>Atlas</span></div>
-      <p class="eyebrow">GOVERNED ANALYST</p>
-      <section class="user-panel" aria-labelledby="user-heading">
-        <div class="panel-heading"><span id="user-heading">Active identity</span><span class="status-dot"></span></div>
-        <button id="active-user" class="active-user" aria-haspopup="listbox" aria-expanded="false">
-          <span class="avatar" id="active-avatar">G</span>
-          <span><strong id="active-name">gokul</strong><small id="active-team">engineering</small></span>
-          <span class="chevron">⌄</span>
-        </button>
-        <div id="user-list" class="user-list" role="listbox" aria-label="Switch active user"></div>
-      </section>
-      <section class="map-panel" aria-labelledby="map-heading">
-        <div class="panel-heading"><span id="map-heading">Your data map</span><span class="map-scope">SCOPED</span></div>
-        <div id="graph" class="graph" aria-live="polite"></div>
-        <p id="graph-caption" class="map-caption">Loading permitted tables…</p>
-      </section>
-      <div class="sidebar-footer"><span class="lock-icon">⌁</span> Customer data plane</div>
-    </aside>
-
-    <main class="main-pane">
-      <header class="topbar">
-        <div><p class="eyebrow">SECURE WORKSPACE</p><h1 id="workspace-title">Ask your governed data</h1></div>
-        <div class="privacy-pill"><span class="status-dot"></span> No vendor data egress</div>
-      </header>
-      <section id="chat-view" class="chat-view">
-        <div id="welcome" class="welcome">
-          <div class="welcome-icon">✦</div>
-          <h2>What would you like to know?</h2>
-          <p>Every question is checked against your role before SQL runs.</p>
-          <div id="example-chips" class="chips" aria-label="Example questions"></div>
-        </div>
-        <div id="answers" class="answers" aria-live="polite"></div>
-        <form id="ask-form" class="composer">
-          <label class="sr-only" for="question">Ask a question about your data</label>
-          <input id="question" autocomplete="off" placeholder="Ask a question about your data…">
-          <button id="send-button" type="submit"><span>Send</span><span aria-hidden="true">↗</span></button>
-        </form>
-      </section>
-      <section id="audit-view" class="audit-view hidden" aria-live="polite"></section>
-    </main>
+  <!-- Ambient background (orbs removed for cleaner silver canvas) -->
+  <div class="ambience" aria-hidden="true">
+    <div class="noise"></div>
   </div>
-  <template id="answer-template"></template>
+
+  <!-- Top navigation -->
+  <nav class="topnav glass" aria-label="Primary">
+    <div class="topnav-inner">
+      <div class="brand">
+        <span class="brand-mark">A</span>
+        <div class="brand-text">
+          <strong>Atlas</strong>
+          <small>Governed AI Data Analyst</small>
+        </div>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab" data-tab="ask" role="tab" aria-selected="true">
+          <span class="tab-icon">✦</span><span>Ask</span>
+        </button>
+        <button class="tab" data-tab="board" role="tab">
+          <span class="tab-icon">◇</span><span>Board</span>
+        </button>
+        <button class="tab" data-tab="map" role="tab">
+          <span class="tab-icon">◈</span><span>Data Map</span>
+        </button>
+        <button class="tab" data-tab="connections" role="tab">
+          <span class="tab-icon">⌸</span><span>Connections</span>
+        </button>
+        <button class="tab" data-tab="models" role="tab">
+          <span class="tab-icon">✵</span><span>Models</span>
+        </button>
+        <button class="tab" data-tab="audit" role="tab">
+          <span class="tab-icon">☰</span><span>Audit</span>
+        </button>
+        <button class="tab" data-tab="governance" role="tab">
+          <span class="tab-icon">▤</span><span>Governance</span>
+        </button>
+      </div>
+
+      <div class="topnav-right">
+        <div class="identity-picker">
+          <button id="active-user" class="identity-btn" aria-haspopup="listbox" aria-expanded="false">
+            <span class="avatar" id="active-avatar">G</span>
+            <span class="identity-text">
+              <strong id="active-name">gokul</strong>
+              <small id="active-team">engineering</small>
+            </span>
+            <span class="chevron">▾</span>
+          </button>
+          <div id="user-list" class="identity-menu glass" role="listbox"></div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="workspace">
+    <!-- Onboarding overlay -->
+    <div id="onboarding" class="onboarding hidden" role="dialog" aria-modal="true" aria-labelledby="onb-title">
+      <div class="onboarding-card glass-strong">
+        <div class="onboarding-progress">
+          <span class="dot active" data-step="1"></span>
+          <span class="dot" data-step="2"></span>
+          <span class="dot" data-step="3"></span>
+          <span class="dot" data-step="4"></span>
+          <span class="dot" data-step="5"></span>
+        </div>
+
+        <div class="onb-step" data-step="1">
+          <div class="onb-eyebrow">STEP 1 · WELCOME</div>
+          <h2 id="onb-title">Welcome to Atlas</h2>
+          <p>
+            Text-to-SQL with a fail-closed firewall, per-user policy scope, and a
+            tamper-evident audit trail. Nothing runs against your warehouse until
+            the firewall approves it.
+          </p>
+          <div class="onb-highlights">
+            <div class="highlight"><span>◈</span><div><strong>Governed</strong><small>Every query is policy-checked</small></div></div>
+            <div class="highlight"><span>◇</span><div><strong>Portable</strong><small>DuckDB, Postgres, Snowflake, BigQuery</small></div></div>
+            <div class="highlight"><span>✵</span><div><strong>BYO model</strong><small>Ollama local or any cloud API key</small></div></div>
+          </div>
+        </div>
+
+        <div class="onb-step hidden" data-step="2">
+          <div class="onb-eyebrow">STEP 2 · CONNECTION</div>
+          <h2>Where does your data live?</h2>
+          <p>Atlas ships with a demo DuckDB warehouse pre-loaded. Add other connections later from the <b>Connections</b> tab.</p>
+          <div class="connection-preview">
+            <div class="conn-chip active">
+              <span>◆</span>
+              <div><strong>Demo Warehouse</strong><small>DuckDB · 7 tables · loaded</small></div>
+              <span class="active-badge">ACTIVE</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="onb-step hidden" data-step="3">
+          <div class="onb-eyebrow">STEP 3 · MODEL</div>
+          <h2>Choose your language model</h2>
+          <p>The built-in <b>deterministic</b> generator answers documented demo questions offline. Point at Ollama for local, or bring your own API key.</p>
+          <div class="model-preview">
+            <div class="model-chip active"><strong>Deterministic (offline)</strong><small>No LLM required · demo questions only</small></div>
+            <div class="model-chip"><strong>Ollama (local)</strong><small>Install ollama, run llama3.2 · zero data egress</small></div>
+            <div class="model-chip"><strong>OpenAI / Anthropic / Groq</strong><small>Bring your own key · configure in Models tab</small></div>
+          </div>
+        </div>
+
+        <div class="onb-step hidden" data-step="4">
+          <div class="onb-eyebrow">STEP 4 · BOARD</div>
+          <h2>Build your dashboard as you go</h2>
+          <p>Every answer has a <b>Pin</b> button. Send it to the <b>Board</b> tab and it becomes a live widget. Export the board as PDF, PNG, or Excel — or share it as a link.</p>
+          <div class="onb-board-preview">
+            <div class="onb-board-tile"><span>◇</span><div><strong>Pin any result</strong><small>Charts, tables, or single values — all supported</small></div></div>
+            <div class="onb-board-tile"><span>⇩</span><div><strong>Export</strong><small>PDF report · PNG image · Excel data · shareable link</small></div></div>
+            <div class="onb-board-tile"><span>✎</span><div><strong>Name your board</strong><small>Rename anytime; saved in your browser</small></div></div>
+          </div>
+        </div>
+
+        <div class="onb-step hidden" data-step="5">
+          <div class="onb-eyebrow">STEP 5 · IDENTITY</div>
+          <h2>Pick who you are</h2>
+          <p>Atlas has four demo identities. Try the same question as different users to see governance in action.</p>
+          <div id="onb-users" class="onb-users"></div>
+          <div class="onb-example">
+            <small>Try asking:</small>
+            <code>average salary by department</code>
+            <small>as <b>gokul</b> (engineering — denied) then <b>mitra</b> (HR — allowed).</small>
+          </div>
+        </div>
+
+        <div class="onb-footer">
+          <button id="onb-skip" class="btn-ghost">Skip tour</button>
+          <div class="onb-nav">
+            <button id="onb-prev" class="btn-secondary">Back</button>
+            <button id="onb-next" class="btn-primary">Continue</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ASK TAB -->
+    <section class="pane active" data-pane="ask">
+      <!-- Toggle to open/close the chat drawer (shown when drawer is collapsed) -->
+      <button id="chat-drawer-toggle" class="chat-drawer-toggle" title="Show chat history">☰</button>
+
+      <div class="ask-layout">
+        <!-- Left drawer: chat history sessions per identity -->
+        <aside class="chat-drawer glass" id="chat-drawer" aria-label="Chat history">
+          <div class="chat-drawer-head">
+            <button id="new-chat-btn" class="new-chat-btn" title="Start a new chat">
+              <span class="plus">+</span>
+              <span>New chat</span>
+            </button>
+            <button id="chat-drawer-collapse" class="drawer-collapse" title="Collapse">‹</button>
+          </div>
+          <div class="chat-search-wrap">
+            <input id="chat-search" class="chat-search" type="search" placeholder="Search chats…" autocomplete="off">
+          </div>
+          <div id="chat-sessions" class="chat-sessions" role="list"></div>
+          <div class="chat-drawer-foot">
+            <span class="chat-drawer-user">Chats for <b id="chat-drawer-user-name">gokul</b></span>
+          </div>
+        </aside>
+
+        <div class="ask-main">
+          <div class="pane-header">
+            <div>
+              <p class="eyebrow">SECURE WORKSPACE · <span id="current-user-hint">gokul</span></p>
+              <h1 id="chat-title">Ask your governed data</h1>
+            </div>
+            <div class="header-badges">
+              <div class="pill pill-success"><span class="dot"></span>No vendor data egress</div>
+              <div class="pill" id="active-model-pill" title="Change in Models tab">✵ deterministic</div>
+            </div>
+          </div>
+
+          <div id="welcome" class="welcome-panel glass">
+            <div class="welcome-icon">✦</div>
+            <h2>What would you like to know?</h2>
+            <p>Every question is policy-checked before any SQL runs.</p>
+            <p id="welcome-hint" class="welcome-hint"></p>
+            <div id="example-chips" class="chips"></div>
+          </div>
+
+          <div id="answers" class="answers" aria-live="polite"></div>
+
+          <form id="ask-form" class="composer">
+            <div class="composer-body">
+              <textarea id="question" rows="1" placeholder="Ask a question about your data…" autocomplete="off"></textarea>
+              <div class="composer-actions">
+                <button type="button" class="btn-ghost" id="composer-provider" title="Choose model for this query">
+                  <span id="composer-provider-label">deterministic</span>
+                  <span class="chevron">▾</span>
+                </button>
+                <button id="send-button" type="submit" class="btn-primary">
+                  <span>Ask</span>
+                  <span class="send-arrow">↗</span>
+                </button>
+              </div>
+            </div>
+            <div id="composer-provider-menu" class="composer-provider-menu glass hidden"></div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- BOARD TAB (user-built dashboard) -->
+    <section class="pane" data-pane="board">
+      <div class="pane-header">
+        <div>
+          <p class="eyebrow">YOUR DASHBOARD</p>
+          <input id="board-title" class="board-title-input" value="My Board" spellcheck="false">
+        </div>
+        <div class="board-header-actions">
+          <div class="pill" id="board-widget-count">0 widgets</div>
+          <div style="position:relative">
+            <button id="share-btn" class="btn-secondary">🔗 Share link</button>
+          </div>
+          <div style="position:relative">
+            <button id="export-btn" class="btn-primary">
+              <span>⇩ Export</span>
+              <span class="chevron">▾</span>
+            </button>
+            <div id="export-menu" class="export-menu glass hidden"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="share-banner" class="share-banner hidden">
+        <span>🔗</span>
+        <code id="share-url"></code>
+        <button class="btn-ghost" id="copy-share">Copy</button>
+        <button class="btn-ghost" id="close-share">✕</button>
+      </div>
+
+      <div id="board-empty" class="board-empty glass">
+        <div class="board-empty-icon">◇</div>
+        <h2>Your board is empty</h2>
+        <p>Pin query results from the <b>Ask</b> tab to build your dashboard. Every allowed chart, table, or value can be pinned here.</p>
+        <button class="btn-primary" id="go-ask">Go to Ask</button>
+      </div>
+
+      <div id="board-grid" class="board-grid"></div>
+    </section>
+
+    <!-- DATA MAP TAB -->
+    <section class="pane" data-pane="map">
+      <div class="pane-header">
+        <div>
+          <p class="eyebrow">DATA MAP · SCOPED TO <span id="map-user-hint">gokul</span></p>
+          <h1>Your permitted tables and joins</h1>
+        </div>
+        <div class="header-badges">
+          <div class="pill" id="map-stats">— tables · — joins</div>
+        </div>
+      </div>
+
+      <div class="map-toolbar glass">
+        <div class="tool-group">
+          <button id="map-zoom-in" class="tool-btn" title="Zoom in">+</button>
+          <button id="map-zoom-out" class="tool-btn" title="Zoom out">−</button>
+          <button id="map-fit" class="tool-btn" title="Fit to view">◇</button>
+          <button id="map-reset" class="tool-btn" title="Reset">↺</button>
+        </div>
+        <div class="tool-group">
+          <label class="tool-label">
+            <input type="checkbox" id="map-show-labels" checked>
+            <span>Show join labels</span>
+          </label>
+          <label class="tool-label">
+            <input type="checkbox" id="map-show-arrows" checked>
+            <span>Show direction</span>
+          </label>
+        </div>
+        <div class="tool-hint">Scroll to zoom · drag to pan</div>
+      </div>
+
+      <div id="map-canvas" class="map-canvas glass" tabindex="0">
+        <svg id="map-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div id="map-empty" class="map-empty hidden">
+          <div class="welcome-icon">◈</div>
+          <h3>No tables in view</h3>
+          <p>This identity has no scoped tables. Switch to <b>gokul</b> or <b>mitra</b> to see the demo warehouse.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- CONNECTIONS TAB -->
+    <section class="pane" data-pane="connections">
+      <div class="pane-header">
+        <div>
+          <p class="eyebrow">DATA SOURCES</p>
+          <h1>Connections</h1>
+        </div>
+      </div>
+
+      <div class="alert glass">
+        <span>◉</span>
+        <div>
+          <strong>The active analyst is bound at boot.</strong>
+          <small>Save connection profiles here and test reachability. Changing the active warehouse still requires a restart with the desired connector — a hot-swap is on the roadmap.</small>
+        </div>
+      </div>
+
+      <div class="connections-grid">
+        <article class="conn-card glass">
+          <div class="conn-head">
+            <span class="conn-badge duckdb">DuckDB</span>
+            <span class="pill pill-success"><span class="dot"></span>ACTIVE</span>
+          </div>
+          <h3>Demo Warehouse</h3>
+          <p class="conn-meta">In-process · read-only · 7 tables · policy-scoped</p>
+          <dl class="conn-details">
+            <div><dt>Path</dt><dd>/app/data/warehouse.duckdb</dd></div>
+            <div><dt>Dialect</dt><dd>duckdb</dd></div>
+            <div><dt>Startup</dt><dd>Bound at container boot</dd></div>
+          </dl>
+        </article>
+
+        <article class="conn-card glass ghost">
+          <div class="conn-head">
+            <span class="conn-badge postgres">Postgres</span>
+            <button class="btn-secondary" data-open-conn="postgres">Configure</button>
+          </div>
+          <h3>Add Postgres</h3>
+          <p class="conn-meta">Session enforced read-only · connection pooling · statement timeout</p>
+          <p class="conn-note">Recommended: use a database role granted only SELECT on the desired schemas.</p>
+        </article>
+
+        <article class="conn-card glass ghost">
+          <div class="conn-head">
+            <span class="conn-badge snowflake">Snowflake</span>
+            <button class="btn-secondary" data-open-conn="snowflake">Configure</button>
+          </div>
+          <h3>Add Snowflake</h3>
+          <p class="conn-meta">Account + warehouse + role · STATEMENT_TIMEOUT enforced</p>
+          <p class="conn-note">Requires <code>atlas-analyst[snowflake]</code> installed.</p>
+        </article>
+
+        <article class="conn-card glass ghost">
+          <div class="conn-head">
+            <span class="conn-badge bigquery">BigQuery</span>
+            <button class="btn-secondary" data-open-conn="bigquery">Configure</button>
+          </div>
+          <h3>Add BigQuery</h3>
+          <p class="conn-meta"><code>maximumBytesBilled</code> cap on every job</p>
+          <p class="conn-note">Requires <code>atlas-analyst[bigquery]</code> installed.</p>
+        </article>
+      </div>
+
+      <div id="conn-saved" class="conn-saved"></div>
+    </section>
+
+    <!-- MODELS TAB -->
+    <section class="pane" data-pane="models">
+      <div class="pane-header">
+        <div>
+          <p class="eyebrow">LLM PROVIDERS</p>
+          <h1>Models</h1>
+        </div>
+      </div>
+
+      <div class="model-active">
+        <div>
+          <p class="eyebrow">CURRENTLY IN USE</p>
+          <h2 id="active-model-name">Deterministic (offline)</h2>
+          <p id="active-model-desc">Answers documented demo questions from a hardcoded mapping. No API key required.</p>
+        </div>
+        <div class="model-active-icon">✵</div>
+      </div>
+
+      <div class="providers-grid" id="providers-grid"></div>
+
+      <div class="profiles-section glass" style="margin-bottom: 18px;">
+        <div class="profiles-head">
+          <div>
+            <h3>Ollama settings</h3>
+            <p class="section-note">Point Atlas at your Ollama server. Default works when Atlas and Ollama run on the same host. When Atlas runs in a container (Podman / Docker), use <code>http://host.containers.internal:11434</code> to reach Ollama on the Mac/Windows host.</p>
+          </div>
+          <button class="btn-secondary" id="ollama-test">Test connection</button>
+        </div>
+        <div class="form-field" style="margin-bottom: 10px;">
+          <label>Base URL</label>
+          <input id="ollama-base-url" type="text" placeholder="http://localhost:11434" autocomplete="off">
+          <small id="ollama-status"></small>
+        </div>
+      </div>
+
+      <div class="profiles-section glass">
+        <div class="profiles-head">
+          <div>
+            <h3>Your saved profiles</h3>
+            <p class="section-note">API keys are encrypted at rest with a peppered key. They never appear in the audit log.</p>
+          </div>
+          <button class="btn-primary" id="new-profile-btn">+ New profile</button>
+        </div>
+        <div id="profiles-list" class="profiles-list"></div>
+      </div>
+    </section>
+
+    <!-- AUDIT TAB -->
+    <section class="pane" data-pane="audit">
+      <div class="pane-header">
+        <div>
+          <p class="eyebrow">TAMPER-EVIDENT LOG</p>
+          <h1>Audit</h1>
+        </div>
+        <div class="header-badges">
+          <button class="btn-secondary" id="audit-refresh">↻ Refresh</button>
+        </div>
+      </div>
+      <div id="audit-view" class="audit-view"></div>
+    </section>
+
+    <!-- GOVERNANCE TAB (was Dashboard) -->
+    <section class="pane" data-pane="governance">
+      <div class="pane-header">
+        <div>
+          <p class="eyebrow">GOVERNANCE OVERVIEW</p>
+          <h1>Governance</h1>
+        </div>
+      </div>
+      <div id="governance-view" class="governance-view"></div>
+    </section>
+  </main>
+
+  <!-- Modal for connection form / new profile -->
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card glass-strong" id="modal-card"></div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" aria-live="polite"></div>
+
   <script src="/static/app.js" defer></script>
 </body>
 </html>

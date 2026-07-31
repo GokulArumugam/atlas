@@ -29,6 +29,12 @@ class UnsupportedQuestion(ValueError):
     """Raised when the deterministic demo generator has no safe known mapping."""
 
 
+class GeneratorUnavailable(RuntimeError):
+    """Raised when the configured provider (Ollama, OpenAI, etc.) can't be reached
+    or returns a fatal error. Distinct from an unsupported question — this means
+    the *model* failed, not the *phrasing*. The message is user-facing."""
+
+
 class SqlGenerator(Protocol):
     def generate(self, user: str, question: str, context: str) -> str:
         """Return one SQL statement for the question and policy-scoped context."""
@@ -115,7 +121,9 @@ class DeterministicGenerator:
                 ORDER BY t.trip_date
             """
         raise UnsupportedQuestion(
-            "I can answer the documented rides and HR demo questions, but I don't yet recognize that question."
+            "The offline deterministic generator only recognizes the documented demo questions. "
+            "To ask questions in your own words, switch the model to Ollama (local) or connect a "
+            "cloud provider (OpenAI, Anthropic, Groq…) from the Models tab."
         )
 
 
@@ -194,7 +202,10 @@ def default_generator() -> SqlGenerator:
         try:
             from atlas.agent.providers.ollama import OllamaGenerator
             from atlas.config.settings import get_settings
-            return OllamaGenerator(base_url=get_settings().ollama_base_url)
+            return OllamaGenerator(
+                base_url=get_settings().ollama_base_url,
+                model=secrets.get("ATLAS_OLLAMA_MODEL") or "qwen2.5-coder:1.5b",
+            )
         except Exception:
             pass
     return DeterministicGenerator()

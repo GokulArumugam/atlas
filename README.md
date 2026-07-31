@@ -261,7 +261,7 @@ To add a different backend (MySQL, Snowflake, Databricks, etc.), implement the `
 
 ## The 90-second demo (the "wow")
 
-1. Log in as **Priya (HR)** → *"average salary by department"* → clean chart. ✅
+1. Log in as **Mitra (HR)** → *"average salary by department"* → clean chart. ✅
 2. Log in as **Gokul (Engineering)** → same question → *"You're on Engineering — I can't access HR data."* 🚫
 3. As Gokul → *"show me riders' phone numbers"* → phone values masked, count still works. 🎭
 4. *"avg riders Airport→Downtown"* → chart in a few seconds. 📊

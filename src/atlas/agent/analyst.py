@@ -8,7 +8,12 @@ from datetime import date, datetime
 from numbers import Number
 from time import perf_counter
 
-from atlas.agent.generator import SqlGenerator, UnsupportedQuestion, default_generator
+from atlas.agent.generator import (
+    GeneratorUnavailable,
+    SqlGenerator,
+    UnsupportedQuestion,
+    default_generator,
+)
 from atlas.audit.audit import AuditLog
 from atlas.cache import TTLLRUCache
 from atlas.catalog.catalog import Catalog
@@ -130,13 +135,16 @@ class Analyst:
                 generated_sql = active_generator.generate(user, question, context)
                 self._sql_cache.set(cache_key, generated_sql)
             except Exception as error:
-                # A known "I don't understand that question" and an unexpected generator
-                # failure both end the same way: a clean denial, nothing executed.
-                reason = (
-                    str(error)
-                    if isinstance(error, UnsupportedQuestion)
-                    else "I couldn't generate a safe query for that question."
-                )
+                # Three failure classes: user's phrasing is out of scope for the
+                # (deterministic) generator, the model itself is unreachable, or
+                # an unexpected crash. Each surfaces a distinct, actionable
+                # message so the user knows what to fix.
+                if isinstance(error, UnsupportedQuestion):
+                    reason = str(error)
+                elif isinstance(error, GeneratorUnavailable):
+                    reason = str(error)
+                else:
+                    reason = "I couldn't generate a safe query for that question."
                 latency_ms["generate"] = _elapsed_ms(generation_started)
                 latency_ms["total"] = _elapsed_ms(started)
                 return self._audited_answer(
@@ -245,6 +253,97 @@ class Analyst:
     def _execute_safe_sql(self, safe_sql: str) -> tuple[list[str], list[tuple]]:
         """Run exactly the firewall-approved SQL through the warehouse connector."""
         return self.connector.execute(safe_sql)
+
+    def run_sql(self, user: str, sql: str, label: str = "") -> AnalystAnswer:
+        """Run user-edited SQL through the full governed pipeline.
+
+        This is the entry point behind the "Run" button on the SQL editor. It
+        bypasses the LLM/deterministic generator (the user typed the SQL
+        themselves) but still goes through:
+
+            firewall.check(user, sql)  →  cost estimate  →  connector.execute
+            → chart shape           →  audited answer  →  hash-chained log
+
+        The user's identity is authoritative; anything they can't see through
+        their policy scope will fail the firewall the same way an LLM-produced
+        query would.
+        """
+        with get_tracer().start_as_current_span("atlas.analyst.run_sql") as span:
+            span.set_attribute("atlas.user", user)
+            span.set_attribute("atlas.sql_length", len(sql))
+            answer = self._run_sql_inner(user, sql, label)
+            span.set_attribute("atlas.decision", answer.decision.value)
+            span.set_attribute("atlas.rows", len(answer.rows))
+            span.set_attribute("atlas.audit_id", answer.audit_id)
+            return answer
+
+    def _run_sql_inner(self, user: str, sql: str, label: str) -> AnalystAnswer:
+        started = perf_counter()
+        latency_ms: dict[str, int] = {
+            "context": 0, "generate": 0, "firewall": 0, "execute": 0, "total": 0,
+        }
+        mermaid = self.mindmap.to_mermaid(user)
+        question = label.strip() or "Edited SQL"
+
+        # Firewall on the raw user SQL.
+        firewall_started = perf_counter()
+        result = self.firewall.check(user, sql)
+        latency_ms["firewall"] = _elapsed_ms(firewall_started)
+
+        if result.decision is Decision.DENY:
+            latency_ms["total"] = _elapsed_ms(started)
+            return self._audited_answer(
+                user=user, question=question, mermaid=mermaid,
+                generated_sql=sql, result=result,
+                decision=result.decision, reason=result.reason,
+                columns=[], rows=[], chart=None, latency_ms=latency_ms,
+            )
+
+        safe_sql = result.safe_sql
+        if safe_sql is None:
+            latency_ms["total"] = _elapsed_ms(started)
+            return self._audited_answer(
+                user=user, question=question, mermaid=mermaid,
+                generated_sql=sql, result=result,
+                decision=Decision.DENY,
+                reason="I can't safely verify that SQL query, so I won't run it.",
+                columns=[], rows=[], chart=None, latency_ms=latency_ms,
+            )
+
+        # Cost check (per-user policy limits).
+        limits = limits_for_user(self.policy.config, user)
+        if limits:
+            estimate = self.cost_estimator.estimate(safe_sql)
+            verdict = check_cost(estimate, limits)
+            if not verdict.allowed:
+                latency_ms["total"] = _elapsed_ms(started)
+                return self._audited_answer(
+                    user=user, question=question, mermaid=mermaid,
+                    generated_sql=sql, result=result,
+                    decision=Decision.DENY, reason=verdict.reason,
+                    columns=[], rows=[], chart=None, latency_ms=latency_ms,
+                )
+
+        # Execute the firewall-approved SQL.
+        execution_started = perf_counter()
+        columns: list[str] = []
+        rows: list[tuple] = []
+        reason = result.reason
+        chart: dict | None = None
+        try:
+            columns, rows = self._execute_safe_sql(safe_sql)
+            chart = self._chart_for(question, columns, rows)
+        except Exception:
+            reason = "The approved query could not be executed against the warehouse."
+        latency_ms["execute"] = _elapsed_ms(execution_started)
+        latency_ms["total"] = _elapsed_ms(started)
+        return self._audited_answer(
+            user=user, question=question, mermaid=mermaid,
+            generated_sql=sql, result=result,
+            decision=result.decision, reason=reason,
+            columns=columns, rows=rows, chart=chart, latency_ms=latency_ms,
+        )
+
 
     def _cache_key(self, user: str, question: str) -> tuple[str, str]:
         """Cache key that binds to the user's *scope*, not just their username.

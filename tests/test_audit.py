@@ -29,12 +29,12 @@ def test_audit_chain_filters_and_tamper_detection(tmp_path):
     path = tmp_path / "audit.duckdb"
     log = AuditLog(str(path))
     _record(log, "gokul", ["rides.trips"])
-    _record(log, "priya", ["hr.employees"])
+    _record(log, "mitra", ["hr.employees"])
     _record(log, "gokul", ["rides.riders"])
 
     assert log.verify_chain()[0]
     assert [entry.user for entry in log.for_user("gokul")] == ["gokul", "gokul"]
-    assert [entry.user for entry in log.touching_schema("hr")] == ["priya"]
+    assert [entry.user for entry in log.touching_schema("hr")] == ["mitra"]
 
     connection = duckdb.connect(str(path))
     try:

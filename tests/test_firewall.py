@@ -28,7 +28,7 @@ ALLOW_CASES = [
     ("gokul", "SELECT AVG(rider_count) FROM rides.trips"),
     ("gokul", "SELECT * FROM rides.trips"),
     ("gokul", "SELECT COUNT(phone) FROM rides.riders"),
-    ("priya", "SELECT AVG(salary) FROM hr.employees"),
+    ("mitra", "SELECT AVG(salary) FROM hr.employees"),
     ("gokul", DEMO_SQL),
     ("gokul", "SELECT 1"),
     ("gokul", "WITH x AS (SELECT phone FROM rides.riders) SELECT COUNT(phone) FROM x"),
@@ -39,7 +39,7 @@ MASK_CASES = [
     ("gokul", "SELECT phone FROM rides.riders"),
     ("gokul", "SELECT * FROM rides.riders"),
     ("gokul", "SELECT phone AS p FROM rides.riders"),
-    ("priya", "SELECT pan FROM hr.employees"),
+    ("mitra", "SELECT pan FROM hr.employees"),
     ("gokul", "SELECT x.phone FROM (SELECT phone FROM rides.riders) x"),
 ]
 
@@ -153,7 +153,7 @@ def test_refusal_names_the_actual_column_not_a_canned_example() -> None:
     firewall look canned and misinforms the user about what was actually blocked.
     """
     firewall = SqlFirewall(PolicyEngine())
-    pan = firewall.check("priya", "SELECT id FROM hr.employees WHERE pan = 'ABCDE1234F'")
+    pan = firewall.check("mitra", "SELECT id FROM hr.employees WHERE pan = 'ABCDE1234F'")
     email = firewall.check("gokul", "SELECT id FROM rides.riders WHERE email = 'a@b.com'")
     name = firewall.check("gokul", "SELECT id FROM rides.riders ORDER BY full_name")
 

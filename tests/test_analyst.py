@@ -24,14 +24,14 @@ def _analyst(tmp_path, connector=None) -> Analyst:
 
 def test_documented_demo_questions_are_governed_and_audited(tmp_path):
     analyst = _analyst(tmp_path)
-    priya = analyst.ask("priya", "average salary by department")
+    mitra = analyst.ask("mitra", "average salary by department")
     denied = analyst.ask("gokul", "average salary by department")
     phones = analyst.ask("gokul", "show me riders' phone numbers")
     riders = analyst.ask("gokul", "average riders from Airport to Downtown")
     daily = analyst.ask("gokul", "trips per day")
 
-    assert priya.decision is Decision.ALLOW
-    assert priya.rows and priya.chart and priya.chart["mark"] == "bar"
+    assert mitra.decision is Decision.ALLOW
+    assert mitra.rows and mitra.chart and mitra.chart["mark"] == "bar"
     assert denied.decision is Decision.DENY
     assert denied.rows == [] and denied.sql is None
     assert "engineering" in denied.reason.lower()
@@ -43,7 +43,7 @@ def test_documented_demo_questions_are_governed_and_audited(tmp_path):
     assert daily.chart and daily.chart["mark"] == "line"
 
     recorded = {entry.audit_id for entry in analyst.audit.all()}
-    assert all(answer.audit_id in recorded for answer in (priya, denied, phones, riders, daily))
+    assert all(answer.audit_id in recorded for answer in (mitra, denied, phones, riders, daily))
     assert analyst.audit.verify_chain()[0]
 
 

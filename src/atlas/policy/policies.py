@@ -28,7 +28,7 @@ POLICY_CONFIG = {
             "visible_tables": {("rides", "locations"), ("rides", "riders"), ("rides", "drivers"), ("rides", "trips")},
             "unmasked_pii": set(),
         },
-        "priya": {
+        "mitra": {
             "team": "hr",
             "visible_tables": {
                 ("rides", "locations"), ("rides", "riders"), ("rides", "drivers"), ("rides", "trips"),

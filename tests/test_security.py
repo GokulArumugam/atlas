@@ -68,10 +68,10 @@ def test_enforced_mode_accepts_valid_key(tmp_path: Path):
         "keys": [
             {
                 "hash": hash_key(key, "unit-test"),
-                "user_id": "priya",
+                "user_id": "mitra",
                 "roles": ["hr"],
                 "tenant_id": "default",
-                "display_name": "Priya",
+                "display_name": "Mitra",
                 "disabled": False,
             }
         ]
@@ -119,7 +119,7 @@ def test_enforced_mode_ignores_body_user_for_identity(tmp_path: Path):
 
     r = client.post(
         "/api/ask",
-        json={"user": "priya", "question": "average salary by department"},
+        json={"user": "mitra", "question": "average salary by department"},
         headers={"X-Atlas-Key": key},
     )
     assert r.status_code == 200

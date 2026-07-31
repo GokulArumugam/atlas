@@ -17,18 +17,19 @@ class AnthropicGenerator:
     name = "anthropic"
     endpoint = "https://api.anthropic.com/v1/messages"
 
-    def __init__(self, api_key: str, model: str = "claude-3-5-sonnet-latest") -> None:
+    def __init__(self, api_key: str, model: str = "claude-3-5-sonnet-latest", dialect: str = "duckdb") -> None:
         if not api_key:
             raise ValueError("api_key is required for Anthropic.")
         self.api_key = api_key
         self.model = model
+        self.dialect = dialect
 
     def generate(self, user: str, question: str, context: str) -> str:
         del user
         body = json.dumps({
             "model": self.model,
             "max_tokens": 600,
-            "system": system_prompt(),
+            "system": system_prompt(self.dialect),
             "messages": [
                 {"role": "user", "content": build_user_message(context, question)},
             ],
