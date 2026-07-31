@@ -15,6 +15,7 @@ from starlette.requests import Request
 
 from atlas.agent.analyst import Analyst, AnalystAnswer
 from atlas.audit.audit import AuditEntry
+from atlas.connector import DuckDBConnector
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -25,7 +26,7 @@ AUDIT_PATH = ROOT / "data" / "audit.duckdb"
 # This object owns a Catalog and MindMap built once when the application module is
 # loaded.  Request handlers only use its already-scoped views, avoiding a costly
 # re-parse of the historical query corpus for every browser interaction.
-analyst = Analyst(db_path=str(DB_PATH), audit_path=str(AUDIT_PATH))
+analyst = Analyst(connector=DuckDBConnector(str(DB_PATH)), audit_path=str(AUDIT_PATH))
 
 app = FastAPI(
     title="Atlas — Governed AI Data Analyst",

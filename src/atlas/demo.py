@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from atlas.agent.analyst import Analyst
+from atlas.connector import DuckDBConnector
 
 
 def main() -> None:
-    analyst = Analyst()
+    analyst = Analyst(DuckDBConnector("data/warehouse.duckdb"))
     questions = [
         ("priya", "average salary by department"),
         ("gokul", "average salary by department"),

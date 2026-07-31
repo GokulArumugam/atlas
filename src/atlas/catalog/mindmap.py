@@ -6,10 +6,10 @@ from collections import Counter
 from dataclasses import dataclass
 import re
 
-import duckdb
 from sqlglot import exp, parse_one
 
 from atlas.catalog.catalog import Catalog
+from atlas.connector.base import WarehouseConnector
 from atlas.policy.model import ColumnRef, TableRef
 
 
@@ -26,10 +26,10 @@ class MindMap:
         self.catalog = catalog
         self._edges: list[JoinEdge] = []
 
-    def build(self, db_path: str) -> None:
+    def build(self, connector: WarehouseConnector) -> None:
         """Learn and rank joins, preferring relationships humans actually used."""
-        history = self._history_edges(db_path)
-        constraints = self._constraint_edges(db_path)
+        history = self._history_edges(connector)
+        constraints = self._constraint_edges(connector)
         heuristics = self._heuristic_edges()
         candidates: dict[tuple[ColumnRef, ColumnRef], JoinEdge] = {}
 
@@ -82,18 +82,14 @@ class MindMap:
             )
         return "\n".join(lines)
 
-    def _history_edges(self, db_path: str) -> list[tuple[tuple[ColumnRef, ColumnRef], int, JoinEdge]]:
-        connection = duckdb.connect(db_path, read_only=True)
-        try:
-            sql_rows = connection.execute("SELECT sql_text FROM meta.query_history").fetchall()
-        finally:
-            connection.close()
+    def _history_edges(self, connector: WarehouseConnector) -> list[tuple[tuple[ColumnRef, ColumnRef], int, JoinEdge]]:
+        sql_texts = connector.query_history()
 
         counts: Counter[tuple[ColumnRef, ColumnRef]] = Counter()
         examples: dict[tuple[ColumnRef, ColumnRef], JoinEdge] = {}
-        for (sql_text,) in sql_rows:
+        for sql_text in sql_texts:
             try:
-                expression = parse_one(sql_text, read="duckdb")
+                expression = parse_one(sql_text, read=connector.dialect)
             except Exception:
                 continue
             aliases = _table_aliases(expression)
@@ -142,33 +138,11 @@ class MindMap:
                     edges.setdefault(key, JoinEdge(left, right, 0.0, ""))
         return edges
 
-    def _constraint_edges(self, db_path: str) -> dict[tuple[ColumnRef, ColumnRef], JoinEdge]:
-        connection = duckdb.connect(db_path, read_only=True)
-        try:
-            rows = connection.execute(
-                """
-                SELECT schema_name, table_name, constraint_text, constraint_column_names
-                FROM duckdb_constraints()
-                WHERE constraint_type = 'FOREIGN KEY'
-                """
-            ).fetchall()
-        except Exception:
-            return {}
-        finally:
-            connection.close()
-
+    def _constraint_edges(self, connector: WarehouseConnector) -> dict[tuple[ColumnRef, ColumnRef], JoinEdge]:
         edges: dict[tuple[ColumnRef, ColumnRef], JoinEdge] = {}
-        pattern = re.compile(
-            r"REFERENCES\s+(?:(?P<schema>[A-Za-z_]\w*)\.)?(?P<table>[A-Za-z_]\w*)\s*\((?P<column>[A-Za-z_]\w*)\)",
-            re.IGNORECASE,
-        )
-        for schema, table, constraint_text, columns in rows:
-            match = pattern.search(constraint_text)
-            if not match or not columns or len(columns) != 1:
-                continue
-            target_schema = match.group("schema") or schema
-            left = ColumnRef(schema, table, columns[0])
-            right = ColumnRef(target_schema, match.group("table"), match.group("column"))
+        for fk in connector.foreign_keys():
+            left = ColumnRef(fk.schema, fk.table, fk.column)
+            right = ColumnRef(fk.ref_schema, fk.ref_table, fk.ref_column)
             edges.setdefault(_edge_key(left, right), JoinEdge(left, right, 0.0, ""))
         return edges
 

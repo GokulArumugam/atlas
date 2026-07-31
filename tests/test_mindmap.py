@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from atlas.catalog.catalog import Catalog
 from atlas.catalog.context import build_context
 from atlas.catalog.mindmap import MindMap
+from atlas.connector import DuckDBConnector
 from atlas.policy.engine import PolicyEngine
 from atlas.policy.model import ColumnRef, TableRef
 
@@ -14,9 +15,10 @@ DB_PATH = "data/warehouse.duckdb"
 
 
 def _map() -> tuple[Catalog, MindMap]:
-    catalog = Catalog(DB_PATH, PolicyEngine())
+    connector = DuckDBConnector(DB_PATH)
+    catalog = Catalog(connector, PolicyEngine())
     mindmap = MindMap(catalog)
-    mindmap.build(DB_PATH)
+    mindmap.build(connector)
     return catalog, mindmap
 
 

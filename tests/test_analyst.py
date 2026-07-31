@@ -3,18 +3,20 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-import duckdb
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from atlas.agent.analyst import Analyst
 from atlas.agent.generator import DeterministicGenerator
+from atlas.connector import DuckDBConnector
+from atlas.connector.base import ForeignKeyInfo, WarehouseConnector
 from atlas.policy.model import Decision
 
 
-def _analyst(tmp_path) -> Analyst:
+def _analyst(tmp_path, connector=None) -> Analyst:
+    if connector is None:
+        connector = DuckDBConnector("data/warehouse.duckdb")
     return Analyst(
-        db_path="data/warehouse.duckdb",
+        connector=connector,
         audit_path=str(tmp_path / "audit.duckdb"),
         generator=DeterministicGenerator(),
     )
@@ -53,37 +55,43 @@ class _RawSqlGenerator:
         return self.sql
 
 
-def test_only_firewall_safe_sql_reaches_the_warehouse(tmp_path, monkeypatch):
-    analyst = _analyst(tmp_path)
-    warehouse = analyst.db_path
-    real_connect = duckdb.connect
-    warehouse_sql: list[str] = []
+class _TrackingConnector(WarehouseConnector):
+    """Wraps another connector and records every SQL passed to execute()."""
 
-    class TrackingConnection:
-        def __init__(self, connection):
-            self.connection = connection
+    def __init__(self, inner: WarehouseConnector) -> None:
+        self._inner = inner
+        self.executed: list[str] = []
 
-        def execute(self, sql, *args, **kwargs):
-            warehouse_sql.append(sql)
-            return self.connection.execute(sql, *args, **kwargs)
+    @property
+    def dialect(self) -> str:
+        return self._inner.dialect
 
-        def __getattr__(self, name):
-            return getattr(self.connection, name)
+    def execute(self, sql: str, params=None) -> tuple[list[str], list[tuple]]:
+        self.executed.append(sql)
+        return self._inner.execute(sql, params)
 
-    def tracking_connect(path, *args, **kwargs):
-        connection = real_connect(path, *args, **kwargs)
-        return TrackingConnection(connection) if str(path) == warehouse else connection
+    def query_history(self) -> list[str]:
+        return self._inner.query_history()
 
-    monkeypatch.setattr("atlas.agent.analyst.duckdb.connect", tracking_connect)
+    def foreign_keys(self) -> list[ForeignKeyInfo]:
+        return self._inner.foreign_keys()
+
+
+def test_only_firewall_safe_sql_reaches_the_warehouse(tmp_path):
+    tracking = _TrackingConnector(DuckDBConnector("data/warehouse.duckdb"))
+    analyst = _analyst(tmp_path, connector=tracking)
+    # Catalog and mindmap construction queries happened during __init__; only
+    # track execute() calls that occur inside ask() from here on.
+    tracking.executed.clear()
 
     analyst.generator = _RawSqlGenerator("SELECT e.salary FROM hr.employees e")
     denied = analyst.ask("gokul", "salary")
     assert denied.decision is Decision.DENY
-    assert warehouse_sql == []
+    assert tracking.executed == []
 
     raw_sql = "SELECT r.phone FROM rides.riders r"
     analyst.generator = _RawSqlGenerator(raw_sql)
     allowed = analyst.ask("gokul", "phones")
     assert allowed.decision is Decision.MASK
     assert allowed.sql != raw_sql
-    assert warehouse_sql == [allowed.sql]
+    assert tracking.executed == [allowed.sql]

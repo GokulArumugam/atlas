@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-
-import duckdb
 
 from atlas.catalog.notes import load_notes
+from atlas.connector.base import WarehouseConnector
 from atlas.policy.engine import PolicyEngine
 from atlas.policy.model import ColumnRef, TableRef
 
@@ -32,8 +30,8 @@ class TableInfo:
 class Catalog:
     """A snapshot of real warehouse metadata; data connections are always read-only."""
 
-    def __init__(self, db_path: str, policy: PolicyEngine) -> None:
-        self.db_path = str(db_path)
+    def __init__(self, connector: WarehouseConnector, policy: PolicyEngine) -> None:
+        self.connector = connector
         self.policy = policy
         self.notes = load_notes()
         self._tables = self._introspect()
@@ -59,56 +57,49 @@ class Catalog:
         sample = max(0, int(sample))
         table_name = _qualified(column.schema, column.table)
         column_name = _quote(column.column)
-        connection = duckdb.connect(self.db_path, read_only=True)
-        try:
-            samples = connection.execute(
-                f"SELECT DISTINCT {column_name} FROM {table_name} "
-                f"WHERE {column_name} IS NOT NULL ORDER BY {column_name} LIMIT ?",
-                [sample],
-            ).fetchall()
-            minimum, maximum = connection.execute(
-                f"SELECT MIN({column_name}), MAX({column_name}) FROM {table_name}"
-            ).fetchone()
-        finally:
-            connection.close()
+
+        _, sample_rows = self.connector.execute(
+            f"SELECT DISTINCT {column_name} FROM {table_name} "
+            f"WHERE {column_name} IS NOT NULL ORDER BY {column_name} LIMIT {sample}"
+        )
+        _, minmax_rows = self.connector.execute(
+            f"SELECT MIN({column_name}), MAX({column_name}) FROM {table_name}"
+        )
+        minimum, maximum = minmax_rows[0]
         return {
             "masked": False,
-            "samples": [row[0] for row in samples],
+            "samples": [row[0] for row in sample_rows],
             "min": minimum,
             "max": maximum,
         }
 
     def _introspect(self) -> list[TableInfo]:
-        connection = duckdb.connect(self.db_path, read_only=True)
-        try:
-            rows = connection.execute(
-                """
-                SELECT table_schema, table_name, column_name, data_type
-                FROM information_schema.columns
-                WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
-                ORDER BY table_schema, table_name, ordinal_position
-                """
-            ).fetchall()
-            table_names = connection.execute(
-                """
-                SELECT table_schema, table_name
-                FROM information_schema.tables
-                WHERE table_type = 'BASE TABLE'
-                  AND table_schema NOT IN ('information_schema', 'pg_catalog')
-                ORDER BY table_schema, table_name
-                """
-            ).fetchall()
-            counts = {
-                TableRef(schema, table): connection.execute(
-                    f"SELECT COUNT(*) FROM {_qualified(schema, table)}"
-                ).fetchone()[0]
-                for schema, table in table_names
-            }
-        finally:
-            connection.close()
+        _, col_rows = self.connector.execute(
+            """
+            SELECT table_schema, table_name, column_name, data_type
+            FROM information_schema.columns
+            WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
+            ORDER BY table_schema, table_name, ordinal_position
+            """
+        )
+        _, table_rows = self.connector.execute(
+            """
+            SELECT table_schema, table_name
+            FROM information_schema.tables
+            WHERE table_type = 'BASE TABLE'
+              AND table_schema NOT IN ('information_schema', 'pg_catalog')
+            ORDER BY table_schema, table_name
+            """
+        )
+        counts: dict[TableRef, int] = {}
+        for schema, table in table_rows:
+            _, count_rows = self.connector.execute(
+                f"SELECT COUNT(*) FROM {_qualified(schema, table)}"
+            )
+            counts[TableRef(schema, table)] = count_rows[0][0]
 
         columns_by_table: dict[TableRef, list[ColumnInfo]] = {ref: [] for ref in counts}
-        for schema, table, column, data_type in rows:
+        for schema, table, column, data_type in col_rows:
             ref = TableRef(schema, table)
             if ref not in columns_by_table:
                 continue

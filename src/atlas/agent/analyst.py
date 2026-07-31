@@ -7,13 +7,12 @@ from datetime import date, datetime
 from numbers import Number
 from time import perf_counter
 
-import duckdb
-
 from atlas.agent.generator import SqlGenerator, UnsupportedQuestion, default_generator
 from atlas.audit.audit import AuditLog
 from atlas.catalog.catalog import Catalog
 from atlas.catalog.context import build_context
 from atlas.catalog.mindmap import MindMap
+from atlas.connector.base import WarehouseConnector
 from atlas.firewall.firewall import FirewallResult, SqlFirewall
 from atlas.policy.engine import PolicyEngine
 from atlas.policy.model import Decision
@@ -47,16 +46,16 @@ class Analyst:
 
     def __init__(
         self,
-        db_path: str = "data/warehouse.duckdb",
+        connector: WarehouseConnector,
         audit_path: str = "data/audit.duckdb",
         generator: SqlGenerator | None = None,
     ) -> None:
-        self.db_path = str(db_path)
+        self.connector = connector
         self.policy = PolicyEngine()
-        self.catalog = Catalog(self.db_path, self.policy)
+        self.catalog = Catalog(connector, self.policy)
         self.mindmap = MindMap(self.catalog)
-        self.mindmap.build(self.db_path)
-        self.firewall = SqlFirewall(self.policy)
+        self.mindmap.build(connector)
+        self.firewall = SqlFirewall(self.policy, dialect=connector.dialect)
         self.generator = generator or default_generator()
         self.audit = AuditLog(audit_path)
 
@@ -119,7 +118,7 @@ class Analyst:
             )
 
         # The one rule that matters: safe_sql is the ONLY SQL that ever reaches
-        # DuckDB. The raw generator output above is kept purely for the audit record.
+        # the warehouse. The raw generator output above is kept purely for the audit record.
         safe_sql = result.safe_sql
         if safe_sql is None:  # Defensive fail-closed guard for any future firewall change.
             latency_ms["total"] = _elapsed_ms(started)
@@ -164,14 +163,8 @@ class Analyst:
         )
 
     def _execute_safe_sql(self, safe_sql: str) -> tuple[list[str], list[tuple]]:
-        """Run exactly the firewall-approved SQL through a read-only connection."""
-        connection = duckdb.connect(self.db_path, read_only=True)
-        try:
-            cursor = connection.execute(safe_sql)
-            columns = [description[0] for description in cursor.description]
-            return columns, cursor.fetchall()
-        finally:
-            connection.close()
+        """Run exactly the firewall-approved SQL through the warehouse connector."""
+        return self.connector.execute(safe_sql)
 
     def _audited_answer(
         self,

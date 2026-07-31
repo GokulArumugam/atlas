@@ -4,6 +4,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from atlas.catalog.catalog import Catalog
+from atlas.connector import DuckDBConnector
 from atlas.policy.engine import PolicyEngine
 from atlas.policy.model import ColumnRef, TableRef
 
@@ -12,7 +13,7 @@ DB_PATH = "data/warehouse.duckdb"
 
 
 def _catalog() -> Catalog:
-    return Catalog(DB_PATH, PolicyEngine())
+    return Catalog(DuckDBConnector(DB_PATH), PolicyEngine())
 
 
 def test_catalog_scopes_gokul_to_rides_only() -> None:

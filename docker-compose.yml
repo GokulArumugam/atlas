@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  atlas:
+    build: .
+    image: atlas-analyst:latest
+    ports:
+      - "${ATLAS_PORT:-8000}:${ATLAS_PORT:-8000}"
+    volumes:
+      # Persist the generated DuckDB files so the warehouse and audit log
+      # survive container restarts without re-generating from scratch.
+      - atlas-data:/app/data
+    environment:
+      ATLAS_HOST: "0.0.0.0"
+      ATLAS_PORT: "${ATLAS_PORT:-8000}"
+      # Drop your key here (or in a .env file) to activate the real Claude LLM.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/users')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  atlas-data:
+    name: atlas-data
