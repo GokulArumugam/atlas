@@ -1,0 +1,32 @@
+# Render Blueprint for Atlas — full Docker deployment.
+# Deploy: Render dashboard → New + → Blueprint → pick GokulArumugam/atlas → Apply.
+services:
+  - type: web
+    name: atlas-analyst
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: ATLAS_PORT
+        value: "8000"
+      # Public demo: auth is open and the demo questions work out of the box.
+      # For a private deployment switch to "enforced" and mint keys with
+      # `atlas-mint-key`.
+      - key: ATLAS_AUTH_MODE
+        value: disabled
+      - key: ATLAS_RATE_LIMIT_PER_MINUTE
+        value: "30"
+      - key: ATLAS_ALLOWED_ORIGINS
+        value: https://gokularumugam.github.io
+      - key: ATLAS_LOG_LEVEL
+        value: INFO
+      - key: ATLAS_LOG_JSON
+        value: "true"
+    # Free-tier instances have ephemeral storage: the synthetic warehouse is
+    # regenerated on first start (the Dockerfile handles this) and the audit
+    # trail resets on redeploy. On a paid plan, uncomment the disk below to
+    # persist /app/data across deploys.
+    # disk:
+    #   name: atlas-data
+    #   mountPath: /app/data
+    #   sizeGB: 1
