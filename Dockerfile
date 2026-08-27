@@ -35,13 +35,15 @@ RUN mkdir -p data && chown -R atlas:atlas /app
 
 USER atlas
 
-EXPOSE 8000
+# Generate the synthetic demo warehouse at BUILD time, not first start:
+# on small instances atlas-generate can take minutes, which would blow
+# Render's ~5-minute port-scan window before uvicorn ever listens.
+RUN atlas-generate
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+__import__('os').environ.get('ATLAS_PORT','8000')+'/api/health', timeout=3).status==200 else 1)"
+  CMD python -c "import urllib.request,os,sys; port=os.environ.get('PORT', os.environ.get('ATLAS_PORT','8000')); sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:'+port+'/api/health', timeout=3).status==200 else 1)"
 
-# First-start bootstrap: generate the synthetic demo warehouse if missing.
+# Bind to $PORT when the platform provides one (Render, Fly, ...), else ATLAS_PORT.
 CMD ["sh", "-c", "\
-  if [ ! -f data/warehouse.duckdb ]; then atlas-generate; fi; \
-  exec uvicorn atlas.api.app:app --host \"${ATLAS_HOST}\" --port \"${ATLAS_PORT}\"\
+  exec uvicorn atlas.api.app:app --host \"${ATLAS_HOST}\" --port \"${PORT:-${ATLAS_PORT:-8000}}\"\
 "]
