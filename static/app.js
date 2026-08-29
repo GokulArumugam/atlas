@@ -84,6 +84,7 @@
   // ---------- tab switching ----------
   function switchTab(tabName) {
     state.tab = tabName;
+    document.body.dataset.tab = tabName;
     $$('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tabName));
     $$('.tab').forEach((t) => t.setAttribute('aria-selected', t.dataset.tab === tabName));
     $$('.pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === tabName));
