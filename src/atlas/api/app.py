@@ -37,6 +37,15 @@ AUDIT_PATH = Path(os.environ.get("ATLAS_AUDIT_PATH") or (ROOT / "data" / "audit.
 
 
 def _build_analyst() -> Analyst:
+    # Point Atlas at an external warehouse by setting ATLAS_DSN, e.g.
+    #   ATLAS_DSN=postgresql://user:pass@host:5432/db
+    # Fall back to the baked-in DuckDB demo warehouse when unset.
+    dsn = os.environ.get("ATLAS_DSN") or ""
+    if dsn.strip():
+        from atlas.connector import PostgresConnector
+
+        logger.info("connector", extra={"event": "postgres_connector", "dsn_host": dsn.split("@")[-1]})
+        return Analyst(connector=PostgresConnector(dsn.strip()), audit_path=str(AUDIT_PATH))
     return Analyst(connector=DuckDBConnector(str(DB_PATH)), audit_path=str(AUDIT_PATH))
 
 
